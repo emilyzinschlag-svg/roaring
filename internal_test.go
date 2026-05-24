@@ -2,10 +2,9 @@ package roaring
 
 import (
 	"math/rand/v2"
-	"testing"
 	"slices"
+	"testing"
 )
-
 
 func TestMakeContainer(t *testing.T) {
 	container := makeContainer()
@@ -24,32 +23,32 @@ func TestMakeContainer(t *testing.T) {
 }
 func TestVectorAddFew(t *testing.T) {
 	tests := []struct {
-		name string
-		initialItems []uint16 
-		addItem uint16 
-		wantAdded bool 
-		wantKind ContainerKind
-	} {
+		name         string
+		initialItems []uint16
+		addItem      uint16
+		wantAdded    bool
+		wantKind     ContainerKind
+	}{
 		{
-			name: "Empty",
+			name:         "Empty",
 			initialItems: []uint16{},
-			addItem: 0,
-			wantAdded: true,
-			wantKind: VECTOR,
+			addItem:      0,
+			wantAdded:    true,
+			wantKind:     VECTOR,
 		},
 		{
-			name: "One item with update",
+			name:         "One item with update",
 			initialItems: []uint16{5},
-			addItem: 0,
-			wantAdded: true,
-			wantKind: VECTOR,
+			addItem:      0,
+			wantAdded:    true,
+			wantKind:     VECTOR,
 		},
 		{
-			name: "One item no update",
+			name:         "One item no update",
 			initialItems: []uint16{5},
-			addItem: 5,
-			wantAdded: false,
-			wantKind: VECTOR,
+			addItem:      5,
+			wantAdded:    false,
+			wantKind:     VECTOR,
 		},
 	}
 	for _, tt := range tests {
@@ -59,7 +58,9 @@ func TestVectorAddFew(t *testing.T) {
 			c.size = len(tt.initialItems)
 
 			gotAdded, err := c.add(tt.addItem)
-			if err != nil { t.Fatal(err.Error()) }
+			if err != nil {
+				t.Fatal(err.Error())
+			}
 
 			if gotAdded != tt.wantAdded {
 				t.Errorf("Add() gotAdded = %t, want %t", gotAdded, tt.wantAdded)
@@ -82,7 +83,9 @@ func TestVectorAddFew(t *testing.T) {
 
 			// second add should have no effect
 			gotAdded, err = c.add(tt.addItem)
-			if err != nil { t.Fatal(err.Error()) }
+			if err != nil {
+				t.Fatal(err.Error())
+			}
 
 			if gotAdded != false {
 				t.Errorf("Add() gotAdded = %t, want false since already added", gotAdded)
@@ -101,97 +104,99 @@ func TestVectorAddFew(t *testing.T) {
 
 func TestAddMany(t *testing.T) {
 	tests := []struct {
-		name string 
-		numbersToAdd int 
-		multiple uint16
-		wantKind ContainerKind
-		pcgInput uint64
+		name         string
+		numbersToAdd int
+		multiple     uint16
+		wantKind     ContainerKind
+		pcgInput     uint64
 	}{
 		{
-			name: "Thousand",
+			name:         "Thousand",
 			numbersToAdd: 1000,
-			multiple: 3,
-			wantKind: VECTOR,
-			pcgInput: 31,
+			multiple:     3,
+			wantKind:     VECTOR,
+			pcgInput:     31,
 		},
 		{
-			name: "Before Switch Threshold",
-			numbersToAdd: ROARING_THRESHOLD - 1,
-			multiple: 1,
-			wantKind: VECTOR,
-			pcgInput: 37,
+			name:         "Before Switch Threshold",
+			numbersToAdd: PROMOTION_THRESHOLD - 1,
+			multiple:     1,
+			wantKind:     VECTOR,
+			pcgInput:     37,
 		},
 		{
-			name: "Switch Threshold",
-			numbersToAdd: ROARING_THRESHOLD,
-			multiple: 1,
-			wantKind: BITMAP,
-			pcgInput: 50,
+			name:         "Switch Threshold",
+			numbersToAdd: PROMOTION_THRESHOLD,
+			multiple:     1,
+			wantKind:     BITMAP,
+			pcgInput:     50,
 		},
 		{
-			name: "Five Thousand",
+			name:         "Five Thousand",
 			numbersToAdd: 5000,
-			multiple: 3,
-			wantKind: BITMAP,
-			pcgInput: 32,
+			multiple:     3,
+			wantKind:     BITMAP,
+			pcgInput:     32,
 		},
 		{
-			name: "Max Unique",
+			name:         "Max Unique",
 			numbersToAdd: MAX_CONTAINER_SIZE,
-			multiple: 1,
-			wantKind: BITMAP,
-			pcgInput: 19,
+			multiple:     1,
+			wantKind:     BITMAP,
+			pcgInput:     19,
 		},
 		{
-			name: "Repeats 1",
+			name:         "Repeats 1",
 			numbersToAdd: MAX_CONTAINER_SIZE * 2,
-			multiple: 1,
-			wantKind: BITMAP,
-			pcgInput: 18,
+			multiple:     1,
+			wantKind:     BITMAP,
+			pcgInput:     18,
 		},
 		{
-			name: "Repeats 2",
+			name:         "Repeats 2",
 			numbersToAdd: MAX_CONTAINER_SIZE * 2,
-			multiple: 2,
-			wantKind: BITMAP,
-			pcgInput: 15,
+			multiple:     2,
+			wantKind:     BITMAP,
+			pcgInput:     15,
 		},
 		{
-			name: "Repeats 3",
+			name:         "Repeats 3",
 			numbersToAdd: MAX_CONTAINER_SIZE * 2,
-			multiple: 2,
-			wantKind: BITMAP,
-			pcgInput: 16,
+			multiple:     2,
+			wantKind:     BITMAP,
+			pcgInput:     16,
 		},
 		{
-			name: "Repeats But Still Vector",
+			name:         "Repeats But Still Vector",
 			numbersToAdd: 1 << 17,
-			multiple: 1 << 8,
-			wantKind: VECTOR,
-			pcgInput: 17,
+			multiple:     1 << 8,
+			wantKind:     VECTOR,
+			pcgInput:     17,
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func (t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
 			vec := make([]uint16, tt.numbersToAdd)
 
 			for i := range vec {
-				item := uint16(i) * tt.multiple 
-				vec[i] = item 
+				item := uint16(i) * tt.multiple
+				vec[i] = item
 				uniqueMap[item] = struct{}{}
 			}
 
 			shuffled := slices.Clone(vec)
 			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
 			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-			
+
 			wantSize := len(uniqueMap)
 			container := makeContainer()
 
 			for i := range shuffled {
 				_, err := container.add(shuffled[i])
-				if err != nil { t.Fatal(err.Error()) }
+				if err != nil {
+					t.Fatal(err.Error())
+				}
 			}
 
 			if wantSize != container.size {
@@ -217,8 +222,8 @@ func TestAddMany(t *testing.T) {
 				for i, got := range container.vector {
 					want := expected[i]
 					if got != want {
-						t.Fatalf("want container vector index %d to be %d, got %d", 
-								i, want, got)
+						t.Fatalf("want container vector index %d to be %d, got %d",
+							i, want, got)
 					}
 				}
 			case BITMAP:

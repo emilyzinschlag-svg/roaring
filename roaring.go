@@ -1,21 +1,24 @@
 package roaring
 
 import (
-	"fmt"	
 	"cmp"
+	"fmt"
 	"math/bits"
 	"slices"
 )
 
 const (
-	ROARING_THRESHOLD = 4096
-	WORD_SIZE = 64
-	MAX_CONTAINER_SIZE = 1 << 16
+	PROMOTION_THRESHOLD   = 4096
+	DEMOTION_THRESHOLD    = 3072
+	WORD_SIZE             = 64
+	MAX_CONTAINER_SIZE    = 1 << 16
 	CONTAINER_BITMAP_SIZE = MAX_CONTAINER_SIZE / WORD_SIZE
 )
+
 type WORD_TYPE uint64
 
 type ContainerKind uint8
+
 const (
 	BITMAP ContainerKind = iota
 	VECTOR
@@ -23,19 +26,19 @@ const (
 
 type Roaring struct {
 	entries []Entry
-	size uint64 // max 2^32
+	size    uint64 // max 2^32
 }
 
 type Entry struct {
-	key uint16
+	key       uint16
 	container *Container
 }
 
 type Container struct {
-	kind ContainerKind
+	kind   ContainerKind
 	bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE
 	vector []uint16
-	size int // max 2^16
+	size   int // max 2^16
 }
 
 func makeRoaring() Roaring {
@@ -43,9 +46,9 @@ func makeRoaring() Roaring {
 }
 
 func (r *Roaring) Add(item uint32) (bool, error) {
-	upper, lower := uint16(item >> 16), uint16(item & 0xFFFF)
+	upper, lower := uint16(item>>16), uint16(item&0xFFFF)
 
-	conversionFunc := func(entry Entry) uint16 { return entry.key } 
+	conversionFunc := func(entry Entry) uint16 { return entry.key }
 	insertionIdx, alreadyExists := getInsertionIdx(r.entries, upper, conversionFunc)
 	if !alreadyExists {
 		container := makeContainer()
@@ -60,7 +63,7 @@ func (r *Roaring) Add(item uint32) (bool, error) {
 	return added, err
 }
 
-func (r * Roaring) Size() uint64 {
+func (r *Roaring) Size() uint64 {
 	return r.size
 }
 
@@ -71,16 +74,11 @@ func makeContainer() *Container {
 
 func containerFromBitMap(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) *Container {
 	size := bitMapOneBits(bitmap)
-	if size < ROARING_THRESHOLD {
-		res := makeContainer() 
-		for wordIdx, word := range bitmap {
-			for i := 0; i < WORD_SIZE; i++ {
-				if word & 1 == 1 {
-					res.add(uint16(wordIdx * WORD_SIZE + i))
-				}
-				word >>= 1
-			}
-		}
+	if size < PROMOTION_THRESHOLD {
+		res := makeContainer()
+		res.vector = bitMapToVector(bitmap)
+
+		res.size = len(res.vector)
 		return res
 	} else {
 		return new(Container{BITMAP, bitmap, nil, size})
@@ -93,6 +91,22 @@ func bitMapOneBits(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) int {
 		oneBits += bits.OnesCount64(uint64(word))
 	}
 	return oneBits
+}
+
+func bitMapToVector(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) []uint16 {
+	var res []uint16
+	for wordIdx, word := range bitmap {
+		if word == 0 {
+			continue
+		}
+		for i := 0; i < WORD_SIZE; i++ {
+			if word & 1 == 1 {
+				res = append(res, uint16(wordIdx*WORD_SIZE + i))
+			}
+			word >>= 1
+		}
+	}
+	return res
 }
 
 func (c *Container) add(item uint16) (bool, error) {
@@ -114,25 +128,38 @@ func (c *Container) find(item uint16, addIfMissing bool, removeIfExists bool) (b
 
 	switch c.kind {
 	case BITMAP:
-		return c.findInBitMap(item, addIfMissing, removeIfExists)
-	case VECTOR:
-		res1, res2 := c.findInVector(item, addIfMissing, removeIfExists)
-		if c.size >= ROARING_THRESHOLD {
-			c.changeToBitMap()
+		res, err := c.findInBitMap(item, addIfMissing, removeIfExists)
+		if err != nil { return false, err }
+
+		if c.size <= DEMOTION_THRESHOLD {
+			err = c.changeToVector()
+			if err != nil { return false, err }
 		}
-		return res1, res2
+
+		return res, err
+
+	case VECTOR:
+		res, err := c.findInVector(item, addIfMissing, removeIfExists)
+		if err != nil { return res, err }
+
+		if c.size >= PROMOTION_THRESHOLD {
+			err = c.changeToBitMap()
+			if err != nil { return false, err }
+		}
+
+		return res, err
 	default:
 		panic("unknown container kind")
 	}
 }
 
 func (c *Container) findInBitMap(item uint16, addIfMissing bool, removeIfExists bool) (bool, error) {
-	if c.kind != BITMAP { 
+	if c.kind != BITMAP {
 		return false, fmt.Errorf("container is not a bitmap")
 	}
-	wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
-	
-	itemExists := (c.bitmap[wordIdx] >> bit) & 1 == 1
+	wordIdx, bit := item/WORD_SIZE, item%WORD_SIZE
+
+	itemExists := (c.bitmap[wordIdx]>>bit)&1 == 1
 
 	if itemExists {
 		if removeIfExists {
@@ -143,20 +170,20 @@ func (c *Container) findInBitMap(item uint16, addIfMissing bool, removeIfExists 
 		return !addIfMissing, nil
 	} else {
 		if addIfMissing {
-			c.bitmap[wordIdx] |= WORD_TYPE(1) << bit 
+			c.bitmap[wordIdx] |= WORD_TYPE(1) << bit
 			c.size++
 			return true, nil
 		}
 		return !removeIfExists, nil
-	}	
+	}
 }
 
 func (c *Container) findInVector(item uint16, addIfMissing bool, removeIfExists bool) (bool, error) {
-	if c.kind != VECTOR { 
+	if c.kind != VECTOR {
 		return false, fmt.Errorf("container is not a vector")
 	}
 
-	itemIdx, alreadyExists := getInsertionIdx(c.vector, item, func(num uint16) uint16 { return num } )
+	itemIdx, alreadyExists := getInsertionIdx(c.vector, item, func(num uint16) uint16 { return num })
 	if alreadyExists {
 
 		if removeIfExists {
@@ -179,15 +206,14 @@ func (c *Container) findInVector(item uint16, addIfMissing bool, removeIfExists 
 	}
 }
 
-
 func getInsertionIdx[T any, R cmp.Ordered](s []T, target R, conversionFunc func(T) R) (int, bool) {
-	lo, hi := 0, len(s) - 1
+	lo, hi := 0, len(s)-1
 	for lo <= hi {
-		mid := lo + (hi - lo) / 2
+		mid := lo + (hi-lo)/2
 		atMid := conversionFunc(s[mid])
 		if atMid == target {
 			return mid, true
-		} else if (target < atMid) {
+		} else if target < atMid {
 			hi = mid - 1
 		} else {
 			lo = mid + 1
@@ -197,7 +223,7 @@ func getInsertionIdx[T any, R cmp.Ordered](s []T, target R, conversionFunc func(
 }
 
 func (c *Container) changeToBitMap() error {
-	if c.size < ROARING_THRESHOLD {
+	if c.size < PROMOTION_THRESHOLD {
 		return fmt.Errorf("size not great enough to warrant change to bitmap: %d", c.size)
 	}
 
@@ -210,6 +236,19 @@ func (c *Container) changeToBitMap() error {
 		c.add(item)
 	}
 	c.vector = nil
+	return nil
+}
+
+func (c *Container) changeToVector() error {
+	if c.size > DEMOTION_THRESHOLD {
+		return fmt.Errorf("size to great to warrant change to vector: %d", c.size)
+	}
+
+	c.kind = VECTOR
+	bitmap := c.bitmap
+	c.bitmap = nil 
+
+	c.vector = bitMapToVector(bitmap)
 	return nil
 }
 
@@ -236,8 +275,12 @@ func (c *Container) intersectVector(o *Container) (*Container, error) {
 				j++
 			} else {
 				ok, err := res.add(c.vector[i])
-				if err != nil { return nil, err }
-				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					return nil, fmt.Errorf("result already contained %d", c.vector[i])
+				}
 				i++
 				j++
 			}
@@ -257,12 +300,16 @@ func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 
 		for i := range c.vector {
 			item := c.vector[i]
-			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
-			
-			if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
+			wordIdx, bit := item/WORD_SIZE, item%WORD_SIZE
+
+			if (c.bitmap[wordIdx]>>bit)&1 == 1 {
 				ok, err := res.add(c.vector[i])
-				if err != nil { return nil, err }
-				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					return nil, fmt.Errorf("result already contained %d", c.vector[i])
+				}
 			}
 		}
 
@@ -273,7 +320,7 @@ func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 			bitmap[i] = c.bitmap[i] & o.bitmap[i]
 		}
 		return containerFromBitMap(&bitmap), nil
-		
+
 	default:
 		panic("unrecognized container kind")
 	}
