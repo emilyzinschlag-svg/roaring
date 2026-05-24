@@ -4,6 +4,7 @@ import (
 	"fmt"	
 	"cmp"
 	"math/bits"
+	"slices"
 )
 
 const (
@@ -48,14 +49,11 @@ func (r *Roaring) Add(item uint32) (bool, error) {
 	insertionIdx, alreadyExists := getInsertionIdx(r.entries, upper, conversionFunc)
 	if !alreadyExists {
 		container := makeContainer()
-		entries, err := addToSlice(r.entries, insertionIdx, Entry{upper, container})
-		if err != nil { return false, err }
-
-		r.entries = entries
+		r.entries = slices.Insert(r.entries, insertionIdx, Entry{upper, container})
 	}
 
 	var container *Container = r.entries[insertionIdx].container
-	added, err := container.Add(lower)
+	added, err := container.add(lower)
 	if err == nil && added == true {
 		r.size++
 	}
@@ -78,7 +76,7 @@ func containerFromBitMap(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) *Container {
 		for wordIdx, word := range bitmap {
 			for i := 0; i < WORD_SIZE; i++ {
 				if word & 1 == 1 {
-					res.Add(uint16(wordIdx * WORD_SIZE + i))
+					res.add(uint16(wordIdx * WORD_SIZE + i))
 				}
 				word >>= 1
 			}
@@ -97,12 +95,28 @@ func bitMapOneBits(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) int {
 	return oneBits
 }
 
-func (c *Container) Add(item uint16) (bool, error) {
+func (c *Container) add(item uint16) (bool, error) {
+	return c.find(item, true, false)
+}
+
+func (c *Container) remove(item uint16) (bool, error) {
+	return c.find(item, false, true)
+}
+
+func (c *Container) contains(item uint16) (bool, error) {
+	return c.find(item, false, false)
+}
+
+func (c *Container) find(item uint16, addIfMissing bool, removeIfExists bool) (bool, error) {
+	if addIfMissing && removeIfExists {
+		return false, fmt.Errorf("addIfMissing and removeIfExists cannot both be true")
+	}
+
 	switch c.kind {
 	case BITMAP:
-		return c.addToBitMap(item)
+		return c.findInBitMap(item, addIfMissing, removeIfExists)
 	case VECTOR:
-		res1, res2 := c.addToVector(item)
+		res1, res2 := c.findInVector(item, addIfMissing, removeIfExists)
 		if c.size >= ROARING_THRESHOLD {
 			c.changeToBitMap()
 		}
@@ -112,38 +126,59 @@ func (c *Container) Add(item uint16) (bool, error) {
 	}
 }
 
-func (c *Container) addToBitMap(item uint16) (bool, error) {
+func (c *Container) findInBitMap(item uint16, addIfMissing bool, removeIfExists bool) (bool, error) {
 	if c.kind != BITMAP { 
 		return false, fmt.Errorf("container is not a bitmap")
 	}
 	wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
 	
-	if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
-		return false, nil
-	}
+	itemExists := (c.bitmap[wordIdx] >> bit) & 1 == 1
 
-	c.bitmap[wordIdx] |= 1 << bit 
-	c.size++
-	return true, nil
+	if itemExists {
+		if removeIfExists {
+			c.bitmap[wordIdx] &= ^(WORD_TYPE(1) << bit)
+			c.size--
+			return true, nil
+		}
+		return !addIfMissing, nil
+	} else {
+		if addIfMissing {
+			c.bitmap[wordIdx] |= WORD_TYPE(1) << bit 
+			c.size++
+			return true, nil
+		}
+		return !removeIfExists, nil
+	}	
 }
 
-func (c *Container) addToVector(item uint16) (bool, error) {
+func (c *Container) findInVector(item uint16, addIfMissing bool, removeIfExists bool) (bool, error) {
 	if c.kind != VECTOR { 
 		return false, fmt.Errorf("container is not a vector")
 	}
 
-	// lo = hi + 1 and vec[hi] < num < vec[lo]
-	// so insert at lo idx
-	insertionIdx, alreadyExists := getInsertionIdx(c.vector, item, func(num uint16) uint16 { return num } )
-	if alreadyExists { return false, nil }
+	itemIdx, alreadyExists := getInsertionIdx(c.vector, item, func(num uint16) uint16 { return num } )
+	if alreadyExists {
 
-	vec, err := addToSlice(c.vector, insertionIdx, item)
-	if err != nil { return false, err }
-	
-	c.vector = vec
-	c.size++
-	return true, nil
+		if removeIfExists {
+			c.vector = slices.Delete(c.vector, itemIdx, itemIdx+1)
+			c.size--
+			return true, nil
+		}
+
+		return !addIfMissing, nil
+
+	} else {
+
+		if addIfMissing {
+			c.vector = slices.Insert(c.vector, itemIdx, item)
+			c.size++
+			return true, nil
+		}
+
+		return !removeIfExists, nil
+	}
 }
+
 
 func getInsertionIdx[T any, R cmp.Ordered](s []T, target R, conversionFunc func(T) R) (int, bool) {
 	lo, hi := 0, len(s) - 1
@@ -172,7 +207,7 @@ func (c *Container) changeToBitMap() error {
 	c.size = 0
 
 	for _, item := range c.vector {
-		c.addToBitMap(item)
+		c.add(item)
 	}
 	c.vector = nil
 	return nil
@@ -200,7 +235,7 @@ func (c *Container) intersectVector(o *Container) (*Container, error) {
 			} else if o.vector[j] < c.vector[i] {
 				j++
 			} else {
-				ok, err := res.Add(c.vector[i])
+				ok, err := res.add(c.vector[i])
 				if err != nil { return nil, err }
 				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
 				i++
@@ -225,7 +260,7 @@ func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
 			
 			if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
-				ok, err := res.Add(c.vector[i])
+				ok, err := res.add(c.vector[i])
 				if err != nil { return nil, err }
 				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
 			}
@@ -246,16 +281,4 @@ func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 
 func (c *Container) union(o *Container) {
 
-}
-
-func addToSlice[T any](s []T, idx int, item T) ([]T, error) {
-	if idx < 0 || idx > len(s) {
-		return nil, fmt.Errorf("index out of bounds: %d", idx)
-	}
-
-	var dummy T
-	s = append(s, dummy)
-	copy(s[idx+1:],s[idx:])
-	s[idx] = item
-	return s, nil
 }

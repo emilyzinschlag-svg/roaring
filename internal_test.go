@@ -58,7 +58,7 @@ func TestVectorAddFew(t *testing.T) {
 			c.vector = tt.initialItems
 			c.size = len(tt.initialItems)
 
-			gotAdded, err := c.Add(tt.addItem)
+			gotAdded, err := c.add(tt.addItem)
 			if err != nil { t.Fatal(err.Error()) }
 
 			if gotAdded != tt.wantAdded {
@@ -81,7 +81,7 @@ func TestVectorAddFew(t *testing.T) {
 			sizeBeforeSecondAdd := c.size
 
 			// second add should have no effect
-			gotAdded, err = c.Add(tt.addItem)
+			gotAdded, err = c.add(tt.addItem)
 			if err != nil { t.Fatal(err.Error()) }
 
 			if gotAdded != false {
@@ -190,7 +190,7 @@ func TestAddMany(t *testing.T) {
 			container := makeContainer()
 
 			for i := range shuffled {
-				_, err := container.Add(shuffled[i])
+				_, err := container.add(shuffled[i])
 				if err != nil { t.Fatal(err.Error()) }
 			}
 
