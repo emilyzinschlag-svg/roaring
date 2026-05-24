@@ -85,6 +85,27 @@ func containerFromBitMap(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) *Container {
 	}
 }
 
+func containerFromVector(vector []uint16) (*Container, error) {
+	if len(vector) < PROMOTION_THRESHOLD {
+		return new(Container{VECTOR, nil, vector, len(vector)}), nil
+	} else {
+		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		prev := -1
+		for _, item := range vector {
+			if int(item) <= prev {
+				err := fmt.Errorf("vector is not strictly increasing")
+				return nil, err
+			}
+			prev = int(item)
+
+			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
+			bitmap[wordIdx] |= WORD_TYPE(1) << bit
+		}
+
+		return new(Container{BITMAP, bitmap, nil, len(vector)}), nil
+	}
+}
+
 func bitMapOneBits(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) int {
 	oneBits := 0
 	for _, word := range bitmap {
@@ -269,26 +290,22 @@ func (c *Container) intersect(o *Container) (*Container, error) {
 func (c *Container) intersectVector(o *Container) (*Container, error) {
 	switch c.kind {
 	case VECTOR:
-		res := makeContainer()
+		resVec := make([]uint16, 0, min(c.size, o.size))
 		i, j := 0, 0
+
 		for i < c.size && j < o.size {
 			if c.vector[i] < o.vector[j] {
 				i++
 			} else if o.vector[j] < c.vector[i] {
 				j++
 			} else {
-				ok, err := res.add(c.vector[i])
-				if err != nil {
-					return nil, err
-				}
-				if !ok {
-					return nil, fmt.Errorf("result already contained %d", c.vector[i])
-				}
+				resVec = append(resVec, c.vector[i])
 				i++
 				j++
 			}
 		}
-		return res, nil
+
+		return containerFromVector(resVec)
 	case BITMAP:
 		return o.intersectBitMap(c)
 	default:
@@ -299,36 +316,93 @@ func (c *Container) intersectVector(o *Container) (*Container, error) {
 func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 	switch c.kind {
 	case VECTOR:
-		res := makeContainer()
+		resVec := make([]uint16, 0, min(c.size, o.size))
 
-		for i := range c.vector {
-			item := c.vector[i]
-			wordIdx, bit := item/WORD_SIZE, item%WORD_SIZE
+		for _, item := range c.vector {
+			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
 
-			if (c.bitmap[wordIdx]>>bit)&1 == 1 {
-				ok, err := res.add(c.vector[i])
-				if err != nil {
-					return nil, err
-				}
-				if !ok {
-					return nil, fmt.Errorf("result already contained %d", c.vector[i])
-				}
+			if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
+				resVec = append(resVec, item)
 			}
 		}
 
-		return res, nil
+		return containerFromVector(resVec)
 	case BITMAP:
-		var bitmap [CONTAINER_BITMAP_SIZE]WORD_TYPE
+		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
 		for i := range c.bitmap {
 			bitmap[i] = c.bitmap[i] & o.bitmap[i]
 		}
-		return containerFromBitMap(&bitmap), nil
 
+		return containerFromBitMap(bitmap), nil
 	default:
 		panic("unrecognized container kind")
 	}
 }
 
-func (c *Container) union(o *Container) {
+func (c *Container) union(o *Container) (*Container, error) {
+	switch o.kind {
+	case VECTOR:
+		return c.unionVector(o)
+	case BITMAP:
+		return c.unionBitMap(o), nil
+	default:
+		panic("unrecognized container kind")
+	}
+}
 
+func (c *Container) unionVector(o *Container) (*Container, error) {
+	switch c.kind {
+	case VECTOR:
+		resVec := make([]uint16, 0, c.size + o.size) 
+		i, j := 0, 0
+		for i < c.size && j < o.size {
+			if c.vector[i] < o.vector[j] {
+				resVec = append(resVec, c.vector[i])
+				i++
+			} else if o.vector[j] < c.vector[i] {
+				resVec = append(resVec, o.vector[j])
+				j++
+			} else {
+				resVec = append(resVec, c.vector[i])
+				i++
+				j++
+			}
+		}
+		resVec = append(resVec, c.vector[i:]...)
+		resVec = append(resVec, o.vector[j:]...)
+
+		return containerFromVector(resVec)
+	case BITMAP:
+		return o.unionBitMap(c), nil
+	default:
+		panic("unrecognized container kind")
+	}
+}
+
+func (c *Container) unionBitMap(o *Container) *Container {
+	switch c.kind {
+	case VECTOR:
+		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		*bitmap = *o.bitmap // copy
+
+		for i := range c.vector {
+			item := c.vector[i]
+			wordIdx, bit := item/WORD_SIZE, item%WORD_SIZE
+
+			if (bitmap[wordIdx] >> bit) & 1 == 0 {
+				bitmap[wordIdx] |= 1 << bit
+			}
+		}
+
+		return containerFromBitMap(bitmap)
+	case BITMAP:
+		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		for i := range c.bitmap {
+			bitmap[i] = c.bitmap[i] | o.bitmap[i]
+		}
+
+		return containerFromBitMap(bitmap)
+	default:
+		panic("unrecognized container kind")
+	}
 }
