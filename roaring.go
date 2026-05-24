@@ -3,11 +3,15 @@ package roaring
 import (
 	"fmt"	
 	"cmp"
+	"math/bits"
 )
 
-const ROARING_THRESHOLD = 4096
-
-const WORD_SIZE = 64
+const (
+	ROARING_THRESHOLD = 4096
+	WORD_SIZE = 64
+	MAX_CONTAINER_SIZE = 1 << 16
+	CONTAINER_BITMAP_SIZE = MAX_CONTAINER_SIZE / WORD_SIZE
+)
 type WORD_TYPE uint64
 
 type ContainerKind uint8
@@ -27,9 +31,8 @@ type Entry struct {
 }
 
 type Container struct {
-	// 2^16 = 2^6 * 2^10 where 2^6 = 64 (bits)
 	kind ContainerKind
-	bitmap *[1 << 10]WORD_TYPE
+	bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE
 	vector []uint16
 	size int // max 2^16
 }
@@ -66,6 +69,32 @@ func (r * Roaring) Size() uint64 {
 func makeContainer() *Container {
 	var vec []uint16
 	return new(Container{VECTOR, nil, vec, 0})
+}
+
+func containerFromBitMap(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) *Container {
+	size := bitMapOneBits(bitmap)
+	if size < ROARING_THRESHOLD {
+		res := makeContainer() 
+		for wordIdx, word := range bitmap {
+			for i := 0; i < WORD_SIZE; i++ {
+				if word & 1 == 1 {
+					res.Add(uint16(wordIdx * WORD_SIZE + i))
+				}
+				word >>= 1
+			}
+		}
+		return res
+	} else {
+		return new(Container{BITMAP, bitmap, nil, size})
+	}
+}
+
+func bitMapOneBits(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) int {
+	oneBits := 0
+	for _, word := range bitmap {
+		oneBits += bits.OnesCount64(uint64(word))
+	}
+	return oneBits
 }
 
 func (c *Container) Add(item uint16) (bool, error) {
@@ -139,7 +168,7 @@ func (c *Container) changeToBitMap() error {
 
 	c.kind = BITMAP
 
-	c.bitmap = new([1 << 10]WORD_TYPE)
+	c.bitmap = new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
 	c.size = 0
 
 	for _, item := range c.vector {
@@ -147,6 +176,76 @@ func (c *Container) changeToBitMap() error {
 	}
 	c.vector = nil
 	return nil
+}
+
+func (c *Container) intersect(o *Container) (*Container, error) {
+	switch o.kind {
+	case VECTOR:
+		return c.intersectVector(o)
+	case BITMAP:
+		return c.intersectBitMap(o)
+	default:
+		panic("unrecognized container kind")
+	}
+}
+
+func (c *Container) intersectVector(o *Container) (*Container, error) {
+	switch c.kind {
+	case VECTOR:
+		res := makeContainer()
+		i, j := 0, 0
+		for i < c.size && j < o.size {
+			if c.vector[i] < o.vector[j] {
+				i++
+			} else if o.vector[j] < c.vector[i] {
+				j++
+			} else {
+				ok, err := res.Add(c.vector[i])
+				if err != nil { return nil, err }
+				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
+				i++
+				j++
+			}
+		}
+		return res, nil
+	case BITMAP:
+		return o.intersectBitMap(c)
+	default:
+		panic("unrecognized container kind")
+	}
+}
+
+func (c *Container) intersectBitMap(o *Container) (*Container, error) {
+	switch c.kind {
+	case VECTOR:
+		res := makeContainer()
+
+		for i := range c.vector {
+			item := c.vector[i]
+			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
+			
+			if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
+				ok, err := res.Add(c.vector[i])
+				if err != nil { return nil, err }
+				if !ok { return nil, fmt.Errorf("result already contained %d", c.vector[i]) }
+			}
+		}
+
+		return res, nil
+	case BITMAP:
+		var bitmap [CONTAINER_BITMAP_SIZE]WORD_TYPE
+		for i := range c.bitmap {
+			bitmap[i] = c.bitmap[i] & o.bitmap[i]
+		}
+		return containerFromBitMap(&bitmap), nil
+		
+	default:
+		panic("unrecognized container kind")
+	}
+}
+
+func (c *Container) union(o *Container) {
+
 }
 
 func addToSlice[T any](s []T, idx int, item T) ([]T, error) {

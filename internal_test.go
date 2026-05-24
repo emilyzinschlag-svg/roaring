@@ -1,7 +1,6 @@
 package roaring
 
 import (
-	"math/bits"
 	"math/rand/v2"
 	"testing"
 	"slices"
@@ -138,38 +137,38 @@ func TestAddMany(t *testing.T) {
 		},
 		{
 			name: "Max Unique",
-			numbersToAdd: 1 << 16,
+			numbersToAdd: MAX_CONTAINER_SIZE,
 			multiple: 1,
 			wantKind: BITMAP,
-			pcgInput: 15,
+			pcgInput: 19,
 		},
 		{
 			name: "Repeats 1",
-			numbersToAdd: 1 << 17,
+			numbersToAdd: MAX_CONTAINER_SIZE * 2,
 			multiple: 1,
 			wantKind: BITMAP,
-			pcgInput: 15,
+			pcgInput: 18,
 		},
 		{
 			name: "Repeats 2",
-			numbersToAdd: 1 << 17,
+			numbersToAdd: MAX_CONTAINER_SIZE * 2,
 			multiple: 2,
 			wantKind: BITMAP,
 			pcgInput: 15,
 		},
 		{
 			name: "Repeats 3",
-			numbersToAdd: 1 << 17,
+			numbersToAdd: MAX_CONTAINER_SIZE * 2,
 			multiple: 2,
 			wantKind: BITMAP,
-			pcgInput: 15,
+			pcgInput: 16,
 		},
 		{
 			name: "Repeats But Still Vector",
 			numbersToAdd: 1 << 17,
 			multiple: 1 << 8,
 			wantKind: VECTOR,
-			pcgInput: 15,
+			pcgInput: 17,
 		},
 	}
 	for _, tt := range tests {
@@ -227,10 +226,7 @@ func TestAddMany(t *testing.T) {
 					t.Fatal("bitmap container has nil bitmap")
 				}
 
-				oneBits := 0
-				for _, word := range container.bitmap {
-					oneBits += bits.OnesCount64(uint64(word))
-				}
+				oneBits := bitMapOneBits(container.bitmap)
 
 				if wantSize != oneBits {
 					t.Errorf("want bitmap one bits = %d, got %d", wantSize, oneBits)
