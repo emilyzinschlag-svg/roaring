@@ -228,13 +228,16 @@ func (c *Container) changeToBitMap() error {
 	}
 
 	c.kind = BITMAP
+	size := c.size
+
 
 	c.bitmap = new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
-	c.size = 0
 
 	for _, item := range c.vector {
 		c.add(item)
 	}
+
+	c.size = size
 	c.vector = nil
 	return nil
 }
