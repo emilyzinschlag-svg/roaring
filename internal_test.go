@@ -1,10 +1,10 @@
 package roaring
 
 import (
+	"math/bits"
 	"math/rand/v2"
 	"testing"
-	"math/bits"
-	//"fmt"
+	"slices"
 )
 
 
@@ -100,14 +100,13 @@ func TestVectorAddFew(t *testing.T) {
 	}
 }
 
-func TestVectorAddMany(t *testing.T) {
+func TestAddMany(t *testing.T) {
 	tests := []struct {
 		name string 
 		numbersToAdd int 
-		multiple int
+		multiple uint16
 		wantKind ContainerKind
 		pcgInput uint64
-
 	}{
 		{
 			name: "Thousand",
@@ -130,26 +129,82 @@ func TestVectorAddMany(t *testing.T) {
 			wantKind: BITMAP,
 			pcgInput: 50,
 		},
+		{
+			name: "Five Thousand",
+			numbersToAdd: 5000,
+			multiple: 3,
+			wantKind: BITMAP,
+			pcgInput: 32,
+		},
+		{
+			name: "Max Unique",
+			numbersToAdd: 1 << 16,
+			multiple: 1,
+			wantKind: BITMAP,
+			pcgInput: 15,
+		},
+		{
+			name: "Repeats 1",
+			numbersToAdd: 1 << 17,
+			multiple: 1,
+			wantKind: BITMAP,
+			pcgInput: 15,
+		},
+		{
+			name: "Repeats 2",
+			numbersToAdd: 1 << 17,
+			multiple: 2,
+			wantKind: BITMAP,
+			pcgInput: 15,
+		},
+		{
+			name: "Repeats 3",
+			numbersToAdd: 1 << 17,
+			multiple: 2,
+			wantKind: BITMAP,
+			pcgInput: 15,
+		},
+		{
+			name: "Repeats But Still Vector",
+			numbersToAdd: 1 << 17,
+			multiple: 1 << 8,
+			wantKind: VECTOR,
+			pcgInput: 15,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func (t *testing.T) {
+			wantSize := -1
 			vec := make([]uint16, tt.numbersToAdd)
+
 			for i := range vec {
-				vec[i] = uint16(i * tt.multiple)
+				if wantSize == -1 && int(uint16(i) * tt.multiple) < i * int(tt.multiple) &&
+				   		(uint16(i) * tt.multiple) % tt.multiple == 0 {
+					wantSize = i // first repeat
+				} 
+				vec[i] = uint16(i) * tt.multiple
 			}
+
+			if wantSize == -1 {
+				wantSize = tt.numbersToAdd
+			}
+
+			shuffled := slices.Clone(vec)
+
+			slices.Sort(vec[:wantSize]) // overflow may mean it wasn't already sorted
+
 			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
-			r.Shuffle(tt.numbersToAdd, func(i, j int) { vec[i], vec[j] = vec[j], vec[i] })
+			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 			
 			container := makeContainer()
 
-			for i := range vec {
-				gotAdded, err := container.Add(vec[i])
+			for i := range shuffled {
+				_, err := container.Add(shuffled[i])
 				if err != nil { t.Fatal(err.Error()) }
-				if !gotAdded { t.Fatalf("failed to add %d (i = %d)", vec[i], i) }
 			}
 
-			if container.size != tt.numbersToAdd {
-				t.Errorf("want container size %d, got %d", container.size, tt.numbersToAdd)
+			if wantSize != container.size {
+				t.Errorf("want container size %d, got %d", wantSize, container.size)
 			}
 
 			if container.kind != tt.wantKind {
@@ -158,12 +213,12 @@ func TestVectorAddMany(t *testing.T) {
 
 			switch container.kind {
 			case VECTOR:
-				if tt.numbersToAdd != len(container.vector) {
-					t.Errorf("want vector length = %d, got %d", tt.numbersToAdd, len(container.vector))
+				if wantSize != len(container.vector) {
+					t.Errorf("want vector length = %d, got %d", wantSize, len(container.vector))
 				}
 
 				for i, got := range container.vector {
-					want := uint16(i * tt.multiple)
+					want := vec[i]
 					if got != want {
 						t.Fatalf("want container vector index %d to be %d, got %d", 
 								i, want, got)
