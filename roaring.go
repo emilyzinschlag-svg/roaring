@@ -46,25 +46,138 @@ func makeRoaring() Roaring {
 }
 
 func (r *Roaring) Add(item uint32) (bool, error) {
-	upper, lower := uint16(item>>16), uint16(item&0xFFFF)
+	return r.find(item, true, false)
+}
+
+func (r *Roaring) Remove(item uint32) (bool, error) {
+	return r.find(item, false, true)
+}
+
+func (r *Roaring) Contains(item uint32) (bool, error) {
+	return r.find(item, false, false)
+}
+
+func (r *Roaring) find(item uint32, addIfMissing bool, removeIfExists bool) (bool, error) {
+	if addIfMissing && removeIfExists {
+		return false, fmt.Errorf("addIfMissing and removeIfExists cannot both be true")
+	}
+
+	upper, lower := uint16(item >> 16), uint16(item & 0xFFFF)
 
 	conversionFunc := func(entry Entry) uint16 { return entry.key }
-	insertionIdx, alreadyExists := getInsertionIdx(r.entries, upper, conversionFunc)
+	containerIdx, alreadyExists := getInsertionIdx(r.entries, upper, conversionFunc)
+
 	if !alreadyExists {
-		container := makeContainer()
-		r.entries = slices.Insert(r.entries, insertionIdx, Entry{upper, container})
+		if addIfMissing {
+			container := makeContainer()
+			r.entries = slices.Insert(r.entries, containerIdx, Entry{upper, container})
+		} else {
+			return false, nil
+		}
 	}
 
-	var container *Container = r.entries[insertionIdx].container
-	added, err := container.add(lower)
-	if err == nil && added == true {
-		r.size++
+	container := r.entries[containerIdx].container
+
+	res, err := container.find(lower, addIfMissing, removeIfExists)
+	if err != nil { return false, err }
+
+	if res && addIfMissing { r.size++ }
+	if res && removeIfExists { r.size-- }
+
+	if container.size == 0 {
+		r.entries = slices.Delete(r.entries, containerIdx, containerIdx+1)
 	}
-	return added, err
+
+	return res, nil
 }
 
 func (r *Roaring) Size() uint64 {
 	return r.size
+}
+
+func (r *Roaring) intersect(o *Roaring) (*Roaring, error) {
+	res := new(makeRoaring())
+	i, j := 0, 0
+
+	for i < len(r.entries) && j < len(o.entries) {
+		e1, e2 := r.entries[i], o.entries[j]
+		
+		if e1.key < e2.key {
+			i++
+		} else if e1.key > e2.key {
+			j++
+		} else {
+			cont, err := e1.container.intersect(e2.container)
+			if err != nil { return nil, err }
+
+			if cont.size != 0 {
+				res.entries = append(res.entries, Entry{e1.key, cont})
+			}
+
+			i++
+			j++
+		}
+	}
+
+	return res, nil
+}
+
+func (r *Roaring) union(o *Roaring) (*Roaring, error) {
+	res := new(makeRoaring())
+	i, j := 0, 0
+
+	for i < len(r.entries) && j < len(o.entries) {
+		e1, e2 := r.entries[i], o.entries[j]
+
+		if e1.key < e2.key {
+			// deepcopy here to
+			res.entries = append(res.entries, *copyEntry(&e1))
+			i++
+		} else if e1.key > e2.key {
+			res.entries = append(res.entries, *copyEntry(&e2))
+			j++
+		} else {
+			cont, err := e1.container.union(e2.container)
+			if err != nil { return nil, err }
+
+			res.entries = append(res.entries, Entry{e1.key, cont})
+			i++
+			j++
+		}
+	}
+
+	res.entries = append(res.entries, copyEntries(r.entries[i:])...)
+	res.entries = append(res.entries, copyEntries(o.entries[j:])...)
+
+	return res, nil
+}
+
+func copyEntries(s []Entry) []Entry {
+	for i, e := range s {
+		s[i] = *copyEntry(&e)
+	}
+	return s
+}
+
+func copyEntry(e *Entry) *Entry {
+	return new(Entry{e.key, copyContainer(e.container)})
+}
+
+func copyContainer(c *Container) *Container {
+	res := new(Container{c.kind, c.bitmap, c.vector, c.size})
+	switch c.kind {
+	case BITMAP:
+		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		*bitmap = *c.bitmap 
+		res.bitmap = bitmap
+	case VECTOR:
+		vector := slices.Clone(c.vector)
+		res.vector = vector
+	default:
+		panic("unrecognized kind")
+	}
+
+	return res
 }
 
 func makeContainer() *Container {
