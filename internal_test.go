@@ -174,28 +174,20 @@ func TestAddMany(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func (t *testing.T) {
-			wantSize := -1
+			uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
 			vec := make([]uint16, tt.numbersToAdd)
 
 			for i := range vec {
-				if wantSize == -1 && int(uint16(i) * tt.multiple) < i * int(tt.multiple) &&
-				   		(uint16(i) * tt.multiple) % tt.multiple == 0 {
-					wantSize = i // first repeat
-				} 
-				vec[i] = uint16(i) * tt.multiple
-			}
-
-			if wantSize == -1 {
-				wantSize = tt.numbersToAdd
+				item := uint16(i) * tt.multiple 
+				vec[i] = item 
+				uniqueMap[item] = struct{}{}
 			}
 
 			shuffled := slices.Clone(vec)
-
-			slices.Sort(vec[:wantSize]) // overflow may mean it wasn't already sorted
-
 			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
 			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 			
+			wantSize := len(uniqueMap)
 			container := makeContainer()
 
 			for i := range shuffled {
@@ -217,8 +209,14 @@ func TestAddMany(t *testing.T) {
 					t.Errorf("want vector length = %d, got %d", wantSize, len(container.vector))
 				}
 
+				expected := make([]uint16, 0, wantSize)
+				for k := range uniqueMap {
+					expected = append(expected, k)
+				}
+				slices.Sort(expected)
+
 				for i, got := range container.vector {
-					want := vec[i]
+					want := expected[i]
 					if got != want {
 						t.Fatalf("want container vector index %d to be %d, got %d", 
 								i, want, got)
@@ -234,8 +232,8 @@ func TestAddMany(t *testing.T) {
 					oneBits += bits.OnesCount64(uint64(word))
 				}
 
-				if container.size != oneBits {
-					t.Errorf("want bitmap one bits = %d, got %d", tt.numbersToAdd, oneBits)
+				if wantSize != oneBits {
+					t.Errorf("want bitmap one bits = %d, got %d", wantSize, oneBits)
 				}
 			default:
 				t.Fatalf("unrecognized kind: %v", container.kind)
