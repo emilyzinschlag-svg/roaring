@@ -174,7 +174,7 @@ func (c *Container) findInBitMap(item uint16, addIfMissing bool, removeIfExists 
 			c.size++
 			return true, nil
 		}
-		return !removeIfExists, nil
+		return false, nil
 	}
 }
 
@@ -202,7 +202,7 @@ func (c *Container) findInVector(item uint16, addIfMissing bool, removeIfExists 
 			return true, nil
 		}
 
-		return !removeIfExists, nil
+		return false, nil
 	}
 }
 

@@ -102,7 +102,7 @@ func TestVectorAddFew(t *testing.T) {
 	}
 }
 
-func TestAddMany(t *testing.T) {
+func TestAddRemoveContainsMany(t *testing.T) {
 	tests := []struct {
 		name         string
 		numbersToAdd int
@@ -182,23 +182,27 @@ func TestAddMany(t *testing.T) {
 			for i := range vec {
 				item := uint16(i) * tt.multiple
 				vec[i] = item
-				uniqueMap[item] = struct{}{}
 			}
 
 			shuffled := slices.Clone(vec)
 			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
 			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 
-			wantSize := len(uniqueMap)
 			container := makeContainer()
 
-			for i := range shuffled {
-				_, err := container.add(shuffled[i])
-				if err != nil {
-					t.Fatal(err.Error())
+			for i, item := range shuffled {
+				_, alreadyIn := uniqueMap[item]
+				uniqueMap[item] = struct{}{}
+
+				gotAdded, err := container.add(shuffled[i])
+				if err != nil { t.Fatal(err.Error()) }
+
+				if alreadyIn == gotAdded {
+					t.Fatalf("alreadyIn = %t but gotAdded = %t", alreadyIn, gotAdded)
 				}
 			}
 
+			wantSize := len(uniqueMap)
 			if wantSize != container.size {
 				t.Errorf("want container size %d, got %d", wantSize, container.size)
 			}
@@ -207,20 +211,23 @@ func TestAddMany(t *testing.T) {
 				t.Errorf("want container kind %v, got %v", container.kind, tt.wantKind)
 			}
 
+			sortedUnique := make([]uint16, 0, wantSize)
+			for k := range uniqueMap {
+				sortedUnique = append(sortedUnique, k)
+			}
+			slices.Sort(sortedUnique)
+
+			shuffledUnique := slices.Clone(sortedUnique)
+			r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
+
 			switch container.kind {
 			case VECTOR:
 				if wantSize != len(container.vector) {
 					t.Errorf("want vector length = %d, got %d", wantSize, len(container.vector))
 				}
 
-				expected := make([]uint16, 0, wantSize)
-				for k := range uniqueMap {
-					expected = append(expected, k)
-				}
-				slices.Sort(expected)
-
 				for i, got := range container.vector {
-					want := expected[i]
+					want := sortedUnique[i]
 					if got != want {
 						t.Fatalf("want container vector index %d to be %d, got %d",
 							i, want, got)
@@ -239,6 +246,40 @@ func TestAddMany(t *testing.T) {
 			default:
 				t.Fatalf("unrecognized kind: %v", container.kind)
 			}
+
+			for _, item := range sortedUnique {
+				sizeBefore := container.size 
+
+				gotAdded, err := container.add(item) 
+				if err != nil { t.Fatal(err.Error()) }
+				if gotAdded { t.Fatalf("add should return false for item already in: %d", item) }
+				if sizeBefore != container.size { t.Fatalf("add should not affect size for item already in: %d", item) }
+
+				contained, err := container.contains(item)
+				if err != nil { t.Fatal(err.Error()) }
+				if !contained { t.Fatalf("contains should return true for item already in: %d", item) }
+				if sizeBefore != container.size { t.Fatalf("contains should not affect size. item: %d", item) }
+
+				removed, err := container.remove(item)
+				if err != nil { t.Fatal(err.Error()) }
+				if !removed { t.Fatalf("removed should return true for item already in: %d", item) }
+				if sizeBefore-1 != container.size { t.Fatalf("want remove to decrement container size: %d", item) }
+				if container.size <= DEMOTION_THRESHOLD && container.kind != VECTOR { 
+					t.Errorf("containers with size below demotion threshold should be vectors") 
+				}
+
+				sizeBefore = container.size 
+				contained, err = container.contains(item)
+				if err != nil { t.Fatal(err.Error()) }
+				if contained { t.Fatalf("contains should return false for removed item: %d", item) }
+				if sizeBefore != container.size { t.Fatalf("contains should not affect size. item: %d", item) }
+			}
+
+			// should now be empty
+			if VECTOR != container.kind { t.Errorf("empty container should have kind %d, got %d", VECTOR, container.kind)}
+			if 0 != container.size { t.Errorf("empty container should have size 0, got %d", container.size) }
+			if 0 != len(container.vector) { t.Errorf("empty container should have vector length 0, got %d", len(container.vector)) }
+			if nil != container.bitmap { t.Errorf("empty container should have nil bitmap") }
 		})
 	}
 }
