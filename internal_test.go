@@ -199,6 +199,16 @@ func containerFromVec(vec []uint16, t *testing.T) *Container {
 	return res
 }
 
+func getSortedUnique(m map[uint16]struct{}) []uint16 {
+	res := make([]uint16, 0, len(m))
+	for k := range m {
+		res = append(res, k)
+	}
+
+	slices.Sort(res)
+	return res 
+}
+
 func apply_op(f func(*Container, *Container) (*Container, error), 
 			  c1 *Container, c2 *Container, t *testing.T) *Container {
 	res, err := f(c1, c2)
@@ -314,11 +324,7 @@ func TestAddRemoveContainsMany(t *testing.T) {
 				t.Errorf("want container kind %v, got %v", container.kind, tt.wantKind)
 			}
 
-			sortedUnique := make([]uint16, 0, wantSize)
-			for k := range uniqueMap {
-				sortedUnique = append(sortedUnique, k)
-			}
-			slices.Sort(sortedUnique)
+			sortedUnique := getSortedUnique(uniqueMap)
 
 			expected := containerFromVec(sortedUnique, t)
 
@@ -511,20 +517,22 @@ func largeUnionIntersectHelper(tt struct {
 	name             string
 	vec1Numbers      int
 	vec1Multiple     int
+	vec1Offset 		 int
 	vec2Numbers      int
 	vec2Multiple     int
-	expectedNumbers  int
-	expectedMultiple int
-}, t *testing.T, f func(*Container, *Container) (*Container, error)) {
+	vec2Offset 		 int
+}, t *testing.T, f func(*Container, *Container) (*Container, error),
+	generateExpectedVec func([]uint16, []uint16) []uint16,
+) {
+	v1 := generateVectorWithOffset(tt.vec1Numbers, tt.vec1Multiple, tt.vec1Offset)
+	v2 := generateVectorWithOffset(tt.vec2Numbers, tt.vec2Multiple, tt.vec2Offset)
 
-	res1, c1, c2 := generateContainersAndApplyFunc(
-		tt.vec1Numbers, tt.vec1Multiple,
-		tt.vec2Numbers, tt.vec2Multiple,
-		f, t,
-	)
+	c1, c2 := containerFromVec(v1, t), containerFromVec(v2, t)
+	res1 := apply_op(f, c1, c2, t)
 	res2 := apply_op(f, c2, c1, t)
 
-	expected := generateContainer(tt.expectedNumbers, tt.expectedMultiple, t)
+	expectedVec := generateExpectedVec(v1, v2)
+	expected := containerFromVec(expectedVec, t)
 
 	compareContainers(res1, expected, t)
 	compareContainers(res2, expected, t)
@@ -535,19 +543,31 @@ func TestIntersectMany(t *testing.T) {
 		name             string
 		vec1Numbers      int
 		vec1Multiple     int
+		vec1Offset 		 int
 		vec2Numbers      int
 		vec2Multiple     int
-		expectedNumbers  int
-		expectedMultiple int
+		vec2Offset 		 int
 	}{
+		{
+			name:             "both_empty",
+			vec1Numbers:      0,
+			vec1Multiple:     3,
+			vec2Numbers:      0,
+			vec2Multiple:     2,
+		},
+		{
+			name:             "one_empty",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     7,
+			vec2Numbers:      0,
+			vec2Multiple:     2,
+		},
 		{
 			name:             "first",
 			vec1Numbers:      PROMOTION_THRESHOLD,
 			vec1Multiple:     3,
 			vec2Numbers:      PROMOTION_THRESHOLD,
 			vec2Multiple:     2,
-			expectedNumbers:  1 + PROMOTION_THRESHOLD/3,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "second",
@@ -555,8 +575,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     3,
 			vec2Numbers:      PROMOTION_THRESHOLD * 3,
 			vec2Multiple:     2,
-			expectedNumbers:  PROMOTION_THRESHOLD,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "third",
@@ -564,8 +582,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     3,
 			vec2Numbers:      PROMOTION_THRESHOLD*3 - 2,
 			vec2Multiple:     2,
-			expectedNumbers:  PROMOTION_THRESHOLD - 1,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "fourth",
@@ -573,8 +589,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     1,
 			vec2Numbers:      PROMOTION_THRESHOLD * 2,
 			vec2Multiple:     2,
-			expectedNumbers:  PROMOTION_THRESHOLD * 2,
-			expectedMultiple: 2,
 		},
 		{
 			name:             "fifth",
@@ -582,8 +596,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     3,
 			vec2Numbers:      PROMOTION_THRESHOLD,
 			vec2Multiple:     2,
-			expectedNumbers:  1 + PROMOTION_THRESHOLD/3,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "sixth",
@@ -591,8 +603,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     3,
 			vec2Numbers:      PROMOTION_THRESHOLD * 2,
 			vec2Multiple:     6,
-			expectedNumbers:  PROMOTION_THRESHOLD / 4,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "seventh",
@@ -600,8 +610,6 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     2,
 			vec2Numbers:      PROMOTION_THRESHOLD / 2,
 			vec2Multiple:     3,
-			expectedNumbers:  1 + PROMOTION_THRESHOLD/6,
-			expectedMultiple: 6,
 		},
 		{
 			name:             "eighth",
@@ -609,14 +617,167 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple:     1,
 			vec2Numbers:      PROMOTION_THRESHOLD / 2,
 			vec2Multiple:     1,
-			expectedNumbers:  PROMOTION_THRESHOLD / 2,
-			expectedMultiple: 1,
 		},
+	}
+
+	vectorwiseIntersect := func(vec1 []uint16, vec2 []uint16) []uint16 {
+		elems := make(map[uint16]struct{})
+		for _, item := range vec1 {
+			elems[item] = struct{}{}
+		}
+		var res []uint16
+		for _, item := range vec2 {
+			_, ok := elems[item]
+			if ok {
+				res = append(res, item)
+			}
+		}
+		slices.Sort(res)
+		return res
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			largeUnionIntersectHelper(tt, t, (*Container).intersect)
+			largeUnionIntersectHelper(tt, t, (*Container).intersect, vectorwiseIntersect)
+		})
+	}
+}
+
+func TestUnionMany(t *testing.T) {
+	tests := []struct {
+		name             string
+		vec1Numbers      int
+		vec1Multiple     int
+		vec1Offset 		 int
+		vec2Numbers      int
+		vec2Multiple     int
+		vec2Offset 		 int
+	}{
+		{
+			name:             "both_empty",
+			vec1Numbers:      0,
+			vec1Multiple:     3,
+			vec2Numbers:      0,
+			vec2Multiple:     2,
+		},
+		{
+			name:             "one_empty",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     7,
+			vec2Numbers:      0,
+			vec2Multiple:     2,
+		},
+		{
+			name:             "first",
+			vec1Numbers:      PROMOTION_THRESHOLD / 2,
+			vec1Multiple:     2,
+			vec1Offset: 	  0,
+			vec2Numbers:      PROMOTION_THRESHOLD / 2,
+			vec2Multiple:     2,
+			vec2Offset: 	  1,
+		},
+		{
+			name:             "second",
+			vec1Numbers:      PROMOTION_THRESHOLD - 1,
+			vec1Multiple:     3,
+			vec2Numbers:      1,
+			vec2Multiple:     0,
+			vec2Offset: 	  5,
+		},
+		{
+			name:             "third",
+			vec1Numbers:      PROMOTION_THRESHOLD - 1,
+			vec1Multiple:     3,
+			vec2Numbers:      1,
+			vec2Multiple:     0,
+			vec2Offset: 	  6,
+		},
+		{
+			name:             "fourth",
+			vec1Numbers:      PROMOTION_THRESHOLD - 1,
+			vec1Multiple:     7,
+			vec1Offset:		  3,
+			vec2Numbers:      PROMOTION_THRESHOLD - 1,
+			vec2Multiple:     11,
+			vec2Offset: 	  253,
+		},
+		{
+			name:             "fifth",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     3,
+			vec1Offset:		  4,
+			vec2Numbers:      PROMOTION_THRESHOLD,
+			vec2Multiple:     3,
+			vec2Offset:		  4,
+		},
+		{
+			name:             "sixth",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     3,
+			vec1Offset:		  4,
+			vec2Numbers:      PROMOTION_THRESHOLD - 1,
+			vec2Multiple:     3,
+			vec2Offset:		  4,
+		},
+		{
+			name:             "seventh",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     3,
+			vec1Offset:		  4,
+			vec2Numbers:      14,
+			vec2Multiple:     3,
+			vec2Offset:		  2,
+		},
+		{
+			name:             "eighth",
+			vec1Numbers:      PROMOTION_THRESHOLD * 2,
+			vec1Multiple:     3,
+			vec1Offset:		  2,
+			vec2Numbers:      PROMOTION_THRESHOLD * 2,
+			vec2Multiple:     3,
+			vec2Offset:		  1,
+		},
+		{
+			name:             "ninth",
+			vec1Numbers:      PROMOTION_THRESHOLD * 2,
+			vec1Multiple:     2,
+			vec2Numbers:      PROMOTION_THRESHOLD * 2,
+			vec2Multiple:     3,
+		},
+		{
+			name:             "tenth",
+			vec1Numbers:      PROMOTION_THRESHOLD - 1,
+			vec1Multiple:     10,
+			vec1Offset: 	  7,
+			vec2Numbers:      PROMOTION_THRESHOLD - 1,
+			vec2Multiple:     10,
+			vec2Offset: 	  7,
+		},
+		{
+			name:             "eleventh",
+			vec1Numbers:      PROMOTION_THRESHOLD / 2 - 1,
+			vec1Multiple:     5,
+			vec1Offset: 	  1,
+			vec2Numbers:      PROMOTION_THRESHOLD / 2 ,
+			vec2Multiple:     5,
+			vec2Offset: 	  3,
+		},
+	}
+
+	vectorwiseUnion := func(vec1 []uint16, vec2 []uint16) []uint16 {
+		elems := make(map[uint16]struct{})
+		for _, item := range vec1 {
+			elems[item] = struct{}{}
+		}
+		for _, item := range vec2 {
+			elems[item] = struct{}{}
+		}
+		return getSortedUnique(elems)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			largeUnionIntersectHelper(tt, t, (*Container).union, vectorwiseUnion)
 		})
 	}
 }

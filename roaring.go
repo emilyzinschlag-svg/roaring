@@ -402,13 +402,13 @@ func (c *Container) intersect(o *Container) (*Container, error) {
 func (c *Container) intersectVector(o *Container) (*Container, error) {
 	switch c.kind {
 	case VECTOR:
-		resVec := make([]uint16, 0, min(c.size, o.size))
+		var resVec []uint16
 		i, j := 0, 0
 
 		for i < c.size && j < o.size {
 			if c.vector[i] < o.vector[j] {
 				i++
-			} else if o.vector[j] < c.vector[i] {
+			} else if c.vector[i] > o.vector[j] {
 				j++
 			} else {
 				resVec = append(resVec, c.vector[i])
@@ -501,10 +501,7 @@ func (c *Container) unionBitMap(o *Container) *Container {
 		for i := range c.vector {
 			item := c.vector[i]
 			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
-
-			if (bitmap[wordIdx] >> bit) & 1 == 0 {
-				bitmap[wordIdx] |= 1 << bit
-			}
+			bitmap[wordIdx] |= 1 << bit
 		}
 
 		return containerFromBitMap(bitmap)
