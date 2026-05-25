@@ -547,6 +547,24 @@ func TestIntersectMany(t *testing.T) {
 			expectedNumbers: PROMOTION_THRESHOLD / 4,
 			expectedMultiple: 6,
 		},
+		{
+			name: "seventh",
+			vec1Numbers: PROMOTION_THRESHOLD / 2,
+			vec1Multiple: 2,
+			vec2Numbers: PROMOTION_THRESHOLD / 2,
+			vec2Multiple: 3,
+			expectedNumbers: 1 + PROMOTION_THRESHOLD / 6,
+			expectedMultiple: 6,
+		},
+		{
+			name: "eighth",
+			vec1Numbers: PROMOTION_THRESHOLD / 2,
+			vec1Multiple: 1,
+			vec2Numbers: PROMOTION_THRESHOLD / 2,
+			vec2Multiple: 1,
+			expectedNumbers: PROMOTION_THRESHOLD / 2,
+			expectedMultiple: 1,
+		},
 	}
 
 	for _, tt := range tests {
