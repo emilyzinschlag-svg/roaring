@@ -433,7 +433,7 @@ func (c *Container) intersectBitMap(o *Container) (*Container, error) {
 		for _, item := range c.vector {
 			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
 
-			if (c.bitmap[wordIdx] >> bit) & 1 == 1 {
+			if (o.bitmap[wordIdx] >> bit) & 1 == 1 {
 				resVec = append(resVec, item)
 			}
 		}

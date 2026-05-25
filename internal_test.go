@@ -499,16 +499,59 @@ func TestIntersectMany(t *testing.T) {
 			vec1Multiple: 3,
 			vec2Numbers: PROMOTION_THRESHOLD,
 			vec2Multiple: 2,
-			expectedNumbers: PROMOTION_THRESHOLD / 3,
+			expectedNumbers: 1 + PROMOTION_THRESHOLD / 3,
+			expectedMultiple: 6,
+		},
+		{
+			name: "second",
+			vec1Numbers: PROMOTION_THRESHOLD * 2,
+			vec1Multiple: 3,
+			vec2Numbers: PROMOTION_THRESHOLD * 3,
+			vec2Multiple: 2,
+			expectedNumbers: PROMOTION_THRESHOLD,
+			expectedMultiple: 6,
+		},
+		{
+			name: "third",
+			vec1Numbers: PROMOTION_THRESHOLD * 2 - 3,
+			vec1Multiple: 3,
+			vec2Numbers: PROMOTION_THRESHOLD * 3 - 2,
+			vec2Multiple: 2,
+			expectedNumbers: PROMOTION_THRESHOLD - 1,
+			expectedMultiple: 6,
+		},
+		{
+			name: "fourth",
+			vec1Numbers: PROMOTION_THRESHOLD * 4,
+			vec1Multiple: 1,
+			vec2Numbers: PROMOTION_THRESHOLD * 2,
+			vec2Multiple: 2,
+			expectedNumbers: PROMOTION_THRESHOLD * 2,
+			expectedMultiple: 2,
+		},
+		{
+			name: "fifth",
+			vec1Numbers: PROMOTION_THRESHOLD - 1,
+			vec1Multiple: 3,
+			vec2Numbers: PROMOTION_THRESHOLD,
+			vec2Multiple: 2,
+			expectedNumbers: 1 + PROMOTION_THRESHOLD / 3,
+			expectedMultiple: 6,
+		},
+		{
+			name: "sixth",
+			vec1Numbers: PROMOTION_THRESHOLD / 2,
+			vec1Multiple: 3,
+			vec2Numbers: PROMOTION_THRESHOLD * 2,
+			vec2Multiple: 6,
+			expectedNumbers: PROMOTION_THRESHOLD / 4,
 			expectedMultiple: 6,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			
-
-
+			largeUnionIntersectHelper(tt, t, (*Container).intersect)
 		})
 	}
 }
