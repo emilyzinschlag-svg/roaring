@@ -209,6 +209,32 @@ func getSortedUnique(m map[uint16]struct{}) []uint16 {
 	return res 
 }
 
+func checkConcreteSize(c *Container, t *testing.T) {
+	switch c.kind {
+	case VECTOR:
+		if len(c.vector) != c.size {
+			t.Errorf("want container vector size %d, got %d", 
+				c.size, len(c.vector))
+		}
+
+		if c.size > 0 && c.vector == nil {
+			t.Fatal("nonempty container with vector kind must have non-nil vector")
+		}
+	case BITMAP:
+		if c.bitmap == nil {
+			t.Fatal("container with bitmap kind must have non-nil bitmap")
+		}
+
+		oneBits := bitMapOneBits(c.bitmap)
+		if oneBits != c.size {
+			t.Errorf("want container one bits %d, got %d", 
+				c.size, oneBits)
+		}
+	default:
+		panic("unknown kind")
+	}
+}
+
 func apply_op(f func(*Container, *Container) (*Container, error), 
 			  c1 *Container, c2 *Container, t *testing.T) *Container {
 	res, err := f(c1, c2)
@@ -536,6 +562,23 @@ func largeUnionIntersectHelper(tt struct {
 
 	compareContainers(res1, expected, t)
 	compareContainers(res2, expected, t)
+
+	// ensure no mutation (i.e. expected is completely distinct)
+	added := false
+	var err error
+	for i := uint16(1); !added; i++ {
+		added, err = expected.add(i)
+		if err != nil { t.Fatal(err.Error()) }
+		if i == 0 { return } // overflowed
+	}
+
+	for _, res := range []*Container{res1, res2} {
+		if expected.size != res.size + 1 {
+			t.Error("expected size should be one greater than res size")
+		}
+
+		checkConcreteSize(res, t)
+	}
 }
 
 func TestIntersectMany(t *testing.T) {
