@@ -1,6 +1,7 @@
 package roaring
 
 import (
+	// "fmt"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -21,7 +22,7 @@ func TestMakeContainer(t *testing.T) {
 	}
 
 }
-func TestVectorAddFew(t *testing.T) {
+func TestAddFew(t *testing.T) {
 	tests := []struct {
 		name         string
 		initialItems []uint16
@@ -284,4 +285,133 @@ func TestAddRemoveContainsMany(t *testing.T) {
 	}
 }
 
+func smallUnionIntersectHelper(vec1 []uint16, vec2 []uint16, expected []uint16, t *testing.T, 
+							  f func (*Container, *Container) (*Container, error)) {
+	first, err := containerFromVector(vec1)
+	if err != nil { t.Fatal(err.Error()) }
 
+	second, err := containerFromVector(vec2)
+	if err != nil { t.Fatal(err.Error()) }
+
+	res1, err := f(first, second)
+	if err != nil { t.Fatal(err.Error()) }
+
+	res2, err := f(second, first)
+	if err != nil { t.Fatal(err.Error()) }
+
+	for _, res := range []*Container{res1, res2} {
+		if res.kind != VECTOR {
+			t.Errorf("intersection of vectors is not a vector")
+		}
+
+		if len(res.vector) != len(expected) {
+			t.Errorf("want vector length %d, got %d", len(expected), len(res.vector))
+		}
+
+		if res.size != len(expected) {
+			t.Errorf("want size %d, got %d", len(expected), res.size)
+		}
+
+		if !slices.Equal(res.vector, expected) {
+			t.Fatalf("want result %v, got %v", expected, res.vector)
+		}
+	}
+}
+
+func TestIntersectFew(t *testing.T) {
+	tests := []struct {
+		name string
+		vec1 []uint16 
+		vec2 []uint16
+		expected []uint16
+	}{
+		{
+			name: "first",
+			vec1: []uint16{1, 2},
+			vec2: []uint16{2, 3},
+			expected: []uint16{2},
+		},
+		{
+			name: "second",
+			vec1: []uint16{1, 2},
+			vec2: []uint16{3, 4},
+			expected: []uint16{},
+		},
+		{
+			name: "third",
+			vec1: []uint16{2, 3},
+			vec2: []uint16{2, 3},
+			expected: []uint16{2, 3},
+		},
+		{
+			name: "fourth",
+			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2: []uint16{4, 7, 8, 9, 15, 17},
+			expected: []uint16{4, 7, 9, 15},
+		},
+		{
+			name: "fifth",
+			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2: []uint16{},
+			expected: []uint16{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			smallUnionIntersectHelper(tt.vec1, tt.vec2, tt.expected, t, (*Container).intersect)
+		})
+	}
+}
+
+func TestUnionFew(t *testing.T) {
+	tests := []struct {
+		name string
+		vec1 []uint16 
+		vec2 []uint16
+		expected []uint16
+	}{
+		{
+			name: "first",
+			vec1: []uint16{1, 2},
+			vec2: []uint16{2, 3},
+			expected: []uint16{1, 2, 3},
+		},
+		{
+			name: "second",
+			vec1: []uint16{1, 2},
+			vec2: []uint16{3, 4},
+			expected: []uint16{1, 2, 3, 4},
+		},
+		{
+			name: "third",
+			vec1: []uint16{2, 3},
+			vec2: []uint16{2, 3},
+			expected: []uint16{2, 3},
+		},
+		{
+			name: "fourth",
+			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2: []uint16{4, 7, 8, 9, 15, 17},
+			expected: []uint16{1, 2, 4, 6, 7, 8, 9, 12, 15, 17},
+		},
+		{
+			name: "fifth",
+			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2: []uint16{},
+			expected: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+		},
+		{
+			name: "sixth",
+			vec1: []uint16{},
+			vec2: []uint16{},
+			expected: []uint16{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			smallUnionIntersectHelper(tt.vec1, tt.vec2, tt.expected, t, (*Container).union)
+		})
+	}
+} 

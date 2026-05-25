@@ -130,7 +130,6 @@ func (r *Roaring) union(o *Roaring) (*Roaring, error) {
 		e1, e2 := r.entries[i], o.entries[j]
 
 		if e1.key < e2.key {
-			// deepcopy here to
 			res.entries = append(res.entries, *copyEntry(&e1))
 			i++
 		} else if e1.key > e2.key {
@@ -472,7 +471,7 @@ func (c *Container) unionVector(o *Container) (*Container, error) {
 			if c.vector[i] < o.vector[j] {
 				resVec = append(resVec, c.vector[i])
 				i++
-			} else if o.vector[j] < c.vector[i] {
+			} else if c.vector[i] > o.vector[j] {
 				resVec = append(resVec, o.vector[j])
 				j++
 			} else {
@@ -481,6 +480,7 @@ func (c *Container) unionVector(o *Container) (*Container, error) {
 				j++
 			}
 		}
+
 		resVec = append(resVec, c.vector[i:]...)
 		resVec = append(resVec, o.vector[j:]...)
 
@@ -496,11 +496,11 @@ func (c *Container) unionBitMap(o *Container) *Container {
 	switch c.kind {
 	case VECTOR:
 		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
-		*bitmap = *o.bitmap // copy
+		*bitmap = *o.bitmap
 
 		for i := range c.vector {
 			item := c.vector[i]
-			wordIdx, bit := item/WORD_SIZE, item%WORD_SIZE
+			wordIdx, bit := item / WORD_SIZE, item % WORD_SIZE
 
 			if (bitmap[wordIdx] >> bit) & 1 == 0 {
 				bitmap[wordIdx] |= 1 << bit
