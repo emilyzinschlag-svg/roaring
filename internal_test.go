@@ -122,7 +122,7 @@ func compareContainers(actual *Container, expected *Container, t *testing.T) {
 
 		if *actual.bitmap != *expected.bitmap {
 			t.Fatalf("actual bitmap and expected do not match")
-		} 
+		}
 
 	case VECTOR:
 		if len(actual.vector) != expected.size {
@@ -141,11 +141,77 @@ func compareContainers(actual *Container, expected *Container, t *testing.T) {
 	}
 }
 
+// Returns result, generated1, generated2
+// where result if f(generated1, generated2)
+func generateContainersAndApplyFunc(
+	length1, multiple1, length2, multiple2 int,
+	f func(*Container, *Container) (*Container, error),
+	t *testing.T) (*Container, *Container, *Container) {
+	return generateContainersAndApplyFuncWithOffsets(
+		length1, multiple1, 0, length2, multiple2, 0, f, t)
+}
+
+func generateContainersAndApplyFuncWithOffsets(length1, multiple1,
+	offset1, length2, multiple2, offset2 int,
+	f func(*Container, *Container) (*Container, error),
+	t *testing.T) (*Container, *Container, *Container) {
+
+	c1 := generateContainerWithOffset(length1, multiple1, offset1, t)
+	c2 := generateContainerWithOffset(length2, multiple2, offset2, t)
+
+	res, err := f(c1, c2)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	return res, c1, c2
+}
+
+func generateContainer(length, multiple int, t *testing.T) *Container {
+	return generateContainerWithOffset(length, multiple, 0, t)
+}
+
+func generateContainerWithOffset(length, multiple, offset int, t *testing.T) *Container {
+	vec := generateVectorWithOffset(length, multiple, offset)
+
+	res := containerFromVec(vec, t)
+	return res
+}
+
+func generateVector(length, multiple int) []uint16 {
+	return generateVectorWithOffset(length, multiple, 0)
+}
+
+func generateVectorWithOffset(length, multiple, offset int) []uint16 {
+	res := make([]uint16, length)
+	for i := range res {
+		res[i] = uint16((i * multiple) + offset)
+	}
+	return res
+}
+
+func containerFromVec(vec []uint16, t *testing.T) *Container {
+	res, err := containerFromVector(vec)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	return res
+}
+
+func apply_op(f func(*Container, *Container) (*Container, error), 
+			  c1 *Container, c2 *Container, t *testing.T) *Container {
+	res, err := f(c1, c2)
+	if err != nil { t.Fatal(err.Error()) }
+
+	return res
+}
+
 func TestAddRemoveContainsMany(t *testing.T) {
 	tests := []struct {
 		name         string
 		numbersToAdd int
-		multiple     uint16
+		multiple     int
 		wantKind     ContainerKind
 		pcgInput     uint64
 	}{
@@ -216,12 +282,8 @@ func TestAddRemoveContainsMany(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
-			vec := make([]uint16, tt.numbersToAdd)
 
-			for i := range vec {
-				item := uint16(i) * tt.multiple
-				vec[i] = item
-			}
+			vec := generateVector(tt.numbersToAdd, tt.multiple)
 
 			shuffled := slices.Clone(vec)
 			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
@@ -234,7 +296,9 @@ func TestAddRemoveContainsMany(t *testing.T) {
 				uniqueMap[item] = struct{}{}
 
 				gotAdded, err := container.add(shuffled[i])
-				if err != nil { t.Fatal(err.Error()) }
+				if err != nil {
+					t.Fatal(err.Error())
+				}
 
 				if alreadyIn == gotAdded {
 					t.Fatalf("alreadyIn = %t but gotAdded = %t", alreadyIn, gotAdded)
@@ -256,8 +320,7 @@ func TestAddRemoveContainsMany(t *testing.T) {
 			}
 			slices.Sort(sortedUnique)
 
-			expected, err := containerFromVector(sortedUnique)
-			if err != nil { t.Fatal(err.Error()) }
+			expected := containerFromVec(sortedUnique, t)
 
 			shuffledUnique := slices.Clone(sortedUnique)
 			r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
@@ -265,110 +328,122 @@ func TestAddRemoveContainsMany(t *testing.T) {
 			compareContainers(container, expected, t)
 
 			for _, item := range shuffledUnique {
-				sizeBefore := container.size 
+				sizeBefore := container.size
 
-				gotAdded, err := container.add(item) 
-				if err != nil { t.Fatal(err.Error()) }
-				if gotAdded { t.Fatalf("add should return false for item already in: %d", item) }
-				if sizeBefore != container.size { t.Fatalf("add should not affect size for item already in: %d", item) }
-
-				contained, err := container.contains(item)
-				if err != nil { t.Fatal(err.Error()) }
-				if !contained { t.Fatalf("contains should return true for item already in: %d", item) }
-				if sizeBefore != container.size { t.Fatalf("contains should not affect size. item: %d", item) }
-
-				removed, err := container.remove(item)
-				if err != nil { t.Fatal(err.Error()) }
-				if !removed { t.Fatalf("removed should return true for item already in: %d", item) }
-				if sizeBefore-1 != container.size { t.Fatalf("want remove to decrement container size: %d", item) }
-				if container.size <= DEMOTION_THRESHOLD && container.kind != VECTOR { 
-					t.Errorf("containers with size below demotion threshold should be vectors") 
+				gotAdded, err := container.add(item)
+				if err != nil {
+					t.Fatal(err.Error())
+				}
+				if gotAdded {
+					t.Fatalf("add should return false for item already in: %d", item)
+				}
+				if sizeBefore != container.size {
+					t.Fatalf("add should not affect size for item already in: %d", item)
 				}
 
-				sizeBefore = container.size 
+				contained, err := container.contains(item)
+				if err != nil {
+					t.Fatal(err.Error())
+				}
+				if !contained {
+					t.Fatalf("contains should return true for item already in: %d", item)
+				}
+				if sizeBefore != container.size {
+					t.Fatalf("contains should not affect size. item: %d", item)
+				}
+
+				removed, err := container.remove(item)
+				if err != nil {
+					t.Fatal(err.Error())
+				}
+				if !removed {
+					t.Fatalf("removed should return true for item already in: %d", item)
+				}
+				if sizeBefore-1 != container.size {
+					t.Fatalf("want remove to decrement container size: %d", item)
+				}
+				if container.size <= DEMOTION_THRESHOLD && container.kind != VECTOR {
+					t.Errorf("containers with size below demotion threshold should be vectors")
+				}
+
+				sizeBefore = container.size
 				contained, err = container.contains(item)
-				if err != nil { t.Fatal(err.Error()) }
-				if contained { t.Fatalf("contains should return false for removed item: %d", item) }
-				if sizeBefore != container.size { t.Fatalf("contains should not affect size. item: %d", item) }
+				if err != nil {
+					t.Fatal(err.Error())
+				}
+				if contained {
+					t.Fatalf("contains should return false for removed item: %d", item)
+				}
+				if sizeBefore != container.size {
+					t.Fatalf("contains should not affect size. item: %d", item)
+				}
 			}
 
 			// should now be empty
-			if VECTOR != container.kind { t.Errorf("empty container should have kind %d, got %d", VECTOR, container.kind)}
-			if 0 != container.size { t.Errorf("empty container should have size 0, got %d", container.size) }
-			if 0 != len(container.vector) { t.Errorf("empty container should have vector length 0, got %d", len(container.vector)) }
-			if nil != container.bitmap { t.Errorf("empty container should have nil bitmap") }
+			if VECTOR != container.kind {
+				t.Errorf("empty container should have kind %d, got %d", VECTOR, container.kind)
+			}
+			if 0 != container.size {
+				t.Errorf("empty container should have size 0, got %d", container.size)
+			}
+			if 0 != len(container.vector) {
+				t.Errorf("empty container should have vector length 0, got %d", len(container.vector))
+			}
+			if nil != container.bitmap {
+				t.Errorf("empty container should have nil bitmap")
+			}
 		})
 	}
 }
 
-func smallUnionIntersectHelper(vec1 []uint16, vec2 []uint16, expected []uint16, t *testing.T, 
-							  f func (*Container, *Container) (*Container, error)) {
-	first, err := containerFromVector(vec1)
-	if err != nil { t.Fatal(err.Error()) }
+func smallUnionIntersectHelper(vec1 []uint16, vec2 []uint16, expectedVec []uint16, t *testing.T,
+	f func(*Container, *Container) (*Container, error)) {
+	first := containerFromVec(vec1, t)
+	second := containerFromVec(vec2, t)
+	expected := containerFromVec(expectedVec, t)
 
-	second, err := containerFromVector(vec2)
-	if err != nil { t.Fatal(err.Error()) }
+	res1 := apply_op(f, first, second, t)
+	res2 := apply_op(f, second, first, t)
 
-	res1, err := f(first, second)
-	if err != nil { t.Fatal(err.Error()) }
-
-	res2, err := f(second, first)
-	if err != nil { t.Fatal(err.Error()) }
-
-	for _, res := range []*Container{res1, res2} {
-		if res.kind != VECTOR {
-			t.Errorf("intersection of vectors is not a vector")
-		}
-
-		if len(res.vector) != len(expected) {
-			t.Errorf("want vector length %d, got %d", len(expected), len(res.vector))
-		}
-
-		if res.size != len(expected) {
-			t.Errorf("want size %d, got %d", len(expected), res.size)
-		}
-
-		if !slices.Equal(res.vector, expected) {
-			t.Fatalf("want result %v, got %v", expected, res.vector)
-		}
-	}
+	compareContainers(res1, expected, t)
+	compareContainers(res2, expected, t)
 }
 
 func TestIntersectFew(t *testing.T) {
 	tests := []struct {
-		name string
-		vec1 []uint16 
-		vec2 []uint16
+		name     string
+		vec1     []uint16
+		vec2     []uint16
 		expected []uint16
 	}{
 		{
-			name: "first",
-			vec1: []uint16{1, 2},
-			vec2: []uint16{2, 3},
+			name:     "first",
+			vec1:     []uint16{1, 2},
+			vec2:     []uint16{2, 3},
 			expected: []uint16{2},
 		},
 		{
-			name: "second",
-			vec1: []uint16{1, 2},
-			vec2: []uint16{3, 4},
+			name:     "second",
+			vec1:     []uint16{1, 2},
+			vec2:     []uint16{3, 4},
 			expected: []uint16{},
 		},
 		{
-			name: "third",
-			vec1: []uint16{2, 3},
-			vec2: []uint16{2, 3},
+			name:     "third",
+			vec1:     []uint16{2, 3},
+			vec2:     []uint16{2, 3},
 			expected: []uint16{2, 3},
 		},
 		{
-			name: "fourth",
-			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
-			vec2: []uint16{4, 7, 8, 9, 15, 17},
+			name:     "fourth",
+			vec1:     []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2:     []uint16{4, 7, 8, 9, 15, 17},
 			expected: []uint16{4, 7, 9, 15},
 		},
 		{
-			name: "fifth",
-			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
-			vec2: []uint16{},
+			name:     "fifth",
+			vec1:     []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2:     []uint16{},
 			expected: []uint16{},
 		},
 	}
@@ -382,45 +457,45 @@ func TestIntersectFew(t *testing.T) {
 
 func TestUnionFew(t *testing.T) {
 	tests := []struct {
-		name string
-		vec1 []uint16 
-		vec2 []uint16
+		name     string
+		vec1     []uint16
+		vec2     []uint16
 		expected []uint16
 	}{
 		{
-			name: "first",
-			vec1: []uint16{1, 2},
-			vec2: []uint16{2, 3},
+			name:     "first",
+			vec1:     []uint16{1, 2},
+			vec2:     []uint16{2, 3},
 			expected: []uint16{1, 2, 3},
 		},
 		{
-			name: "second",
-			vec1: []uint16{1, 2},
-			vec2: []uint16{3, 4},
+			name:     "second",
+			vec1:     []uint16{1, 2},
+			vec2:     []uint16{3, 4},
 			expected: []uint16{1, 2, 3, 4},
 		},
 		{
-			name: "third",
-			vec1: []uint16{2, 3},
-			vec2: []uint16{2, 3},
+			name:     "third",
+			vec1:     []uint16{2, 3},
+			vec2:     []uint16{2, 3},
 			expected: []uint16{2, 3},
 		},
 		{
-			name: "fourth",
-			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
-			vec2: []uint16{4, 7, 8, 9, 15, 17},
+			name:     "fourth",
+			vec1:     []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2:     []uint16{4, 7, 8, 9, 15, 17},
 			expected: []uint16{1, 2, 4, 6, 7, 8, 9, 12, 15, 17},
 		},
 		{
-			name: "fifth",
-			vec1: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
-			vec2: []uint16{},
+			name:     "fifth",
+			vec1:     []uint16{1, 2, 4, 6, 7, 9, 12, 15},
+			vec2:     []uint16{},
 			expected: []uint16{1, 2, 4, 6, 7, 9, 12, 15},
 		},
 		{
-			name: "sixth",
-			vec1: []uint16{},
-			vec2: []uint16{},
+			name:     "sixth",
+			vec1:     []uint16{},
+			vec2:     []uint16{},
 			expected: []uint16{},
 		},
 	}
@@ -433,136 +508,108 @@ func TestUnionFew(t *testing.T) {
 }
 
 func largeUnionIntersectHelper(tt struct {
-		name string
-		vec1Numbers int 
-		vec1Multiple int
-		vec2Numbers int
-		vec2Multiple int
-		expectedNumbers int 
-		expectedMultiple int
-	}, t *testing.T, f func(*Container, *Container) (*Container, error)) {
-	
-	vec1 := make([]uint16, tt.vec1Numbers)
-	vec2 := make([]uint16, tt.vec2Numbers)
+	name             string
+	vec1Numbers      int
+	vec1Multiple     int
+	vec2Numbers      int
+	vec2Multiple     int
+	expectedNumbers  int
+	expectedMultiple int
+}, t *testing.T, f func(*Container, *Container) (*Container, error)) {
 
-	for i := 0; i < tt.vec1Numbers; i++ {
-		vec1[i] = uint16(i * tt.vec1Multiple)
-	}
+	res1, c1, c2 := generateContainersAndApplyFunc(
+		tt.vec1Numbers, tt.vec1Multiple,
+		tt.vec2Numbers, tt.vec2Multiple,
+		f, t,
+	)
+	res2 := apply_op(f, c2, c1, t)
 
-	for i := 0; i < tt.vec2Numbers; i++ {
-		vec2[i] = uint16(i * tt.vec2Multiple)
-	}
+	expected := generateContainer(tt.expectedNumbers, tt.expectedMultiple, t)
 
-	c1, err := containerFromVector(vec1)
-	if err != nil { t.Fatal(err.Error()) }
-
-	c2, err := containerFromVector(vec2)
-	if err != nil { t.Fatal(err.Error()) }
-
-	res1, err := f(c1, c2)
-	if err != nil { t.Fatal(err.Error()) }
-
-	res2, err := f(c2, c1)
-	if err != nil { t.Fatal(err.Error()) }
-
-	expectedVec := make([]uint16, tt.expectedNumbers)
-
-	for i := 0; i < tt.expectedNumbers; i++ {
-		expectedVec[i] = uint16(i * tt.expectedMultiple)
-	}
-
-	expected, err := containerFromVector(expectedVec)
-	if err != nil { t.Fatal(err.Error()) }
-
-	for _, res := range []*Container{res1, res2} {
-		if res.kind != expected.kind {
-			t.Errorf("want kind %d, got %d", expected.kind, res.kind)
-		}
-
-		compareContainers(res, expected, t)
-	}
+	compareContainers(res1, expected, t)
+	compareContainers(res2, expected, t)
 }
 
 func TestIntersectMany(t *testing.T) {
 	tests := []struct {
-		name string
-		vec1Numbers int 
-		vec1Multiple int
-		vec2Numbers int
-		vec2Multiple int
-		expectedNumbers int 
+		name             string
+		vec1Numbers      int
+		vec1Multiple     int
+		vec2Numbers      int
+		vec2Multiple     int
+		expectedNumbers  int
 		expectedMultiple int
 	}{
 		{
-			name: "first",
-			vec1Numbers: PROMOTION_THRESHOLD,
-			vec1Multiple: 3,
-			vec2Numbers: PROMOTION_THRESHOLD,
-			vec2Multiple: 2,
-			expectedNumbers: 1 + PROMOTION_THRESHOLD / 3,
+			name:             "first",
+			vec1Numbers:      PROMOTION_THRESHOLD,
+			vec1Multiple:     3,
+			vec2Numbers:      PROMOTION_THRESHOLD,
+			vec2Multiple:     2,
+			expectedNumbers:  1 + PROMOTION_THRESHOLD/3,
 			expectedMultiple: 6,
 		},
 		{
-			name: "second",
-			vec1Numbers: PROMOTION_THRESHOLD * 2,
-			vec1Multiple: 3,
-			vec2Numbers: PROMOTION_THRESHOLD * 3,
-			vec2Multiple: 2,
-			expectedNumbers: PROMOTION_THRESHOLD,
+			name:             "second",
+			vec1Numbers:      PROMOTION_THRESHOLD * 2,
+			vec1Multiple:     3,
+			vec2Numbers:      PROMOTION_THRESHOLD * 3,
+			vec2Multiple:     2,
+			expectedNumbers:  PROMOTION_THRESHOLD,
 			expectedMultiple: 6,
 		},
 		{
-			name: "third",
-			vec1Numbers: PROMOTION_THRESHOLD * 2 - 3,
-			vec1Multiple: 3,
-			vec2Numbers: PROMOTION_THRESHOLD * 3 - 2,
-			vec2Multiple: 2,
-			expectedNumbers: PROMOTION_THRESHOLD - 1,
+			name:             "third",
+			vec1Numbers:      PROMOTION_THRESHOLD*2 - 3,
+			vec1Multiple:     3,
+			vec2Numbers:      PROMOTION_THRESHOLD*3 - 2,
+			vec2Multiple:     2,
+			expectedNumbers:  PROMOTION_THRESHOLD - 1,
 			expectedMultiple: 6,
 		},
 		{
-			name: "fourth",
-			vec1Numbers: PROMOTION_THRESHOLD * 4,
-			vec1Multiple: 1,
-			vec2Numbers: PROMOTION_THRESHOLD * 2,
-			vec2Multiple: 2,
-			expectedNumbers: PROMOTION_THRESHOLD * 2,
+			name:             "fourth",
+			vec1Numbers:      PROMOTION_THRESHOLD * 4,
+			vec1Multiple:     1,
+			vec2Numbers:      PROMOTION_THRESHOLD * 2,
+			vec2Multiple:     2,
+			expectedNumbers:  PROMOTION_THRESHOLD * 2,
 			expectedMultiple: 2,
 		},
 		{
-			name: "fifth",
-			vec1Numbers: PROMOTION_THRESHOLD - 1,
-			vec1Multiple: 3,
-			vec2Numbers: PROMOTION_THRESHOLD,
-			vec2Multiple: 2,
-			expectedNumbers: 1 + PROMOTION_THRESHOLD / 3,
+			name:             "fifth",
+			vec1Numbers:      PROMOTION_THRESHOLD - 1,
+			vec1Multiple:     3,
+			vec2Numbers:      PROMOTION_THRESHOLD,
+			vec2Multiple:     2,
+			expectedNumbers:  1 + PROMOTION_THRESHOLD/3,
 			expectedMultiple: 6,
 		},
 		{
-			name: "sixth",
-			vec1Numbers: PROMOTION_THRESHOLD / 2,
-			vec1Multiple: 3,
-			vec2Numbers: PROMOTION_THRESHOLD * 2,
-			vec2Multiple: 6,
-			expectedNumbers: PROMOTION_THRESHOLD / 4,
+			name:             "sixth",
+			vec1Numbers:      PROMOTION_THRESHOLD / 2,
+			vec1Multiple:     3,
+			vec2Numbers:      PROMOTION_THRESHOLD * 2,
+			vec2Multiple:     6,
+			expectedNumbers:  PROMOTION_THRESHOLD / 4,
 			expectedMultiple: 6,
 		},
 		{
-			name: "seventh",
-			vec1Numbers: PROMOTION_THRESHOLD / 2,
-			vec1Multiple: 2,
-			vec2Numbers: PROMOTION_THRESHOLD / 2,
-			vec2Multiple: 3,
-			expectedNumbers: 1 + PROMOTION_THRESHOLD / 6,
+			name:             "seventh",
+			vec1Numbers:      PROMOTION_THRESHOLD / 2,
+			vec1Multiple:     2,
+			vec2Numbers:      PROMOTION_THRESHOLD / 2,
+			vec2Multiple:     3,
+			expectedNumbers:  1 + PROMOTION_THRESHOLD/6,
 			expectedMultiple: 6,
 		},
 		{
-			name: "eighth",
-			vec1Numbers: PROMOTION_THRESHOLD / 2,
-			vec1Multiple: 1,
-			vec2Numbers: PROMOTION_THRESHOLD / 2,
-			vec2Multiple: 1,
-			expectedNumbers: PROMOTION_THRESHOLD / 2,
+			name:             "eighth",
+			vec1Numbers:      PROMOTION_THRESHOLD / 2,
+			vec1Multiple:     1,
+			vec2Numbers:      PROMOTION_THRESHOLD / 2,
+			vec2Multiple:     1,
+			expectedNumbers:  PROMOTION_THRESHOLD / 2,
 			expectedMultiple: 1,
 		},
 	}
