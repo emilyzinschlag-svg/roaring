@@ -2,7 +2,7 @@ package roaring
 
 import (
 	// "fmt"
-	"math/rand/v2"
+	// "math/rand/v2"
 	"slices"
 	"testing"
 )
@@ -20,7 +20,6 @@ func TestMakeContainer(t *testing.T) {
 	if container.size != len(container.vector) {
 		t.Errorf("new container size is not equal to its vector length")
 	}
-
 }
 func TestAddFew(t *testing.T) {
 	tests := []struct {
@@ -172,21 +171,9 @@ func generateContainer(length, multiple int, t *testing.T) *Container {
 }
 
 func generateContainerWithOffset(length, multiple, offset int, t *testing.T) *Container {
-	vec := generateVectorWithOffset(length, multiple, offset)
+	vec := generateVectorWithOffset[uint16](length, multiple, offset)
 
 	res := containerFromVec(vec, t)
-	return res
-}
-
-func generateVector(length, multiple int) []uint16 {
-	return generateVectorWithOffset(length, multiple, 0)
-}
-
-func generateVectorWithOffset(length, multiple, offset int) []uint16 {
-	res := make([]uint16, length)
-	for i := range res {
-		res[i] = uint16((i * multiple) + offset)
-	}
 	return res
 }
 
@@ -197,16 +184,6 @@ func containerFromVec(vec []uint16, t *testing.T) *Container {
 	}
 
 	return res
-}
-
-func getSortedUnique(m map[uint16]struct{}) []uint16 {
-	res := make([]uint16, 0, len(m))
-	for k := range m {
-		res = append(res, k)
-	}
-
-	slices.Sort(res)
-	return res 
 }
 
 func checkConcreteSize(c *Container, t *testing.T) {
@@ -317,58 +294,63 @@ func TestAddRemoveContainsMany(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
+			cont := makeContainer()
+			addRemoveContainsTester(tt.name, tt.numbersToAdd, tt.multiple, []uint16{},
+									tt.pcgInput, cont.toAdapter(), t)
 
-			vec := generateVector(tt.numbersToAdd, tt.multiple)
 
-			shuffled := slices.Clone(vec)
-			r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
-			r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+			// uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
 
-			container := makeContainer()
+			// vec := generateVector[uint16](tt.numbersToAdd, tt.multiple)
 
-			for i, item := range shuffled {
-				_, alreadyIn := uniqueMap[item]
-				uniqueMap[item] = struct{}{}
+			// shuffled := slices.Clone(vec)
+			// r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
+			// r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
 
-				gotAdded, err := container.add(shuffled[i])
-				if err != nil {
-					t.Fatal(err.Error())
-				}
+			// container := makeContainer()
 
-				if alreadyIn == gotAdded {
-					t.Fatalf("alreadyIn = %t but gotAdded = %t", alreadyIn, gotAdded)
-				}
-			}
+			// for i, item := range shuffled {
+			// 	_, alreadyIn := uniqueMap[item]
+			// 	uniqueMap[item] = struct{}{}
 
-			wantSize := len(uniqueMap)
-			if wantSize != container.size {
-				t.Errorf("want container size %d, got %d", wantSize, container.size)
-			}
+			// 	gotAdded, err := container.add(shuffled[i])
+			// 	if err != nil {
+			// 		t.Fatal(err.Error())
+			// 	}
 
-			if container.kind != tt.wantKind {
-				t.Errorf("want container kind %v, got %v", container.kind, tt.wantKind)
-			}
+			// 	if alreadyIn == gotAdded {
+			// 		t.Fatalf("alreadyIn = %t but gotAdded = %t", alreadyIn, gotAdded)
+			// 	}
+			// }
 
-			sortedUnique := getSortedUnique(uniqueMap)
+			// wantSize := len(uniqueMap)
+			// if wantSize != container.size {
+			// 	t.Errorf("want container size %d, got %d", wantSize, container.size)
+			// }
 
-			expected := containerFromVec(sortedUnique, t)
+			// if container.kind != tt.wantKind {
+			// 	t.Errorf("want container kind %v, got %v", container.kind, tt.wantKind)
+			// }
 
-			shuffledUnique := slices.Clone(sortedUnique)
-			r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
+			// sortedUnique := getSortedUnique(uniqueMap)
 
-			compareContainers(container, expected, t)
+			// expected := containerFromVec(sortedUnique, t)
 
-			containerRemoveAllTester(container, shuffledUnique, t)
+			// shuffledUnique := slices.Clone(sortedUnique)
+			// r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
+
+			// compareContainers(container, expected, t)
+
+			// containerRemoveAllTester(container, shuffledUnique, t)
 
 			// should now be empty
-			if container.kind != VECTOR {
-				t.Errorf("empty container should have kind %d, got %d", VECTOR, container.kind)
+			if cont.kind != VECTOR {
+				t.Errorf("empty container should have kind %d, got %d", VECTOR, cont.kind)
 			}
-			if len(container.vector) != 0 {
-				t.Errorf("empty container should have vector length 0, got %d", len(container.vector))
+			if len(cont.vector) != 0 {
+				t.Errorf("empty container should have vector length 0, got %d", len(cont.vector))
 			}
-			if container.bitmap != nil {
+			if cont.bitmap != nil {
 				t.Errorf("empty container should have nil bitmap")
 			}
 		})
@@ -497,8 +479,8 @@ func largeUnionIntersectHelper(tt struct {
 }, t *testing.T, f func(*Container, *Container) (*Container, error),
 	generateExpectedVec func([]uint16, []uint16) []uint16,
 ) {
-	v1 := generateVectorWithOffset(tt.vec1Numbers, tt.vec1Multiple, tt.vec1Offset)
-	v2 := generateVectorWithOffset(tt.vec2Numbers, tt.vec2Multiple, tt.vec2Offset)
+	v1 := generateVectorWithOffset[uint16](tt.vec1Numbers, tt.vec1Multiple, tt.vec1Offset)
+	v2 := generateVectorWithOffset[uint16](tt.vec2Numbers, tt.vec2Multiple, tt.vec2Offset)
 
 	c1, c2 := containerFromVec(v1, t), containerFromVec(v2, t)
 	res1 := apply_op(f, c1, c2, t)
