@@ -103,6 +103,44 @@ func TestAddFew(t *testing.T) {
 	}
 }
 
+func compareContainers(actual *Container, expected *Container, t *testing.T) {
+	if expected.kind != actual.kind {
+		t.Errorf("want kind %d, got %d", expected.kind, actual.kind)
+	}
+
+	switch expected.kind {
+	case BITMAP:
+		if actual.bitmap == nil {
+			t.Fatal("bitmap container has nil bitmap")
+		}
+
+		oneBits := bitMapOneBits(actual.bitmap)
+
+		if oneBits != expected.size {
+			t.Errorf("want bitmap one bits = %d, got %d", expected.size, oneBits)
+		}
+
+		if *actual.bitmap != *expected.bitmap {
+			t.Fatalf("actual bitmap and expected do not match")
+		} 
+
+	case VECTOR:
+		if len(actual.vector) != expected.size {
+			t.Errorf("want vector length %d, got %d", expected.size, len(actual.vector))
+		}
+
+		if actual.size != expected.size {
+			t.Errorf("want size %d, got %d", expected.size, actual.size)
+		}
+
+		if !slices.Equal(actual.vector, expected.vector) {
+			t.Fatalf("actual vector and expected do not match")
+		}
+	default:
+		panic("unrecognized kind")
+	}
+}
+
 func TestAddRemoveContainsMany(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -218,37 +256,15 @@ func TestAddRemoveContainsMany(t *testing.T) {
 			}
 			slices.Sort(sortedUnique)
 
+			expected, err := containerFromVector(sortedUnique)
+			if err != nil { t.Fatal(err.Error()) }
+
 			shuffledUnique := slices.Clone(sortedUnique)
 			r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
 
-			switch container.kind {
-			case VECTOR:
-				if wantSize != len(container.vector) {
-					t.Errorf("want vector length = %d, got %d", wantSize, len(container.vector))
-				}
+			compareContainers(container, expected, t)
 
-				for i, got := range container.vector {
-					want := sortedUnique[i]
-					if got != want {
-						t.Fatalf("want container vector index %d to be %d, got %d",
-							i, want, got)
-					}
-				}
-			case BITMAP:
-				if container.bitmap == nil {
-					t.Fatal("bitmap container has nil bitmap")
-				}
-
-				oneBits := bitMapOneBits(container.bitmap)
-
-				if wantSize != oneBits {
-					t.Errorf("want bitmap one bits = %d, got %d", wantSize, oneBits)
-				}
-			default:
-				t.Fatalf("unrecognized kind: %v", container.kind)
-			}
-
-			for _, item := range sortedUnique {
+			for _, item := range shuffledUnique {
 				sizeBefore := container.size 
 
 				gotAdded, err := container.add(item) 
@@ -414,4 +430,85 @@ func TestUnionFew(t *testing.T) {
 			smallUnionIntersectHelper(tt.vec1, tt.vec2, tt.expected, t, (*Container).union)
 		})
 	}
-} 
+}
+
+func largeUnionIntersectHelper(tt struct {
+		name string
+		vec1Numbers int 
+		vec1Multiple int
+		vec2Numbers int
+		vec2Multiple int
+		expectedNumbers int 
+		expectedMultiple int
+	}, t *testing.T, f func(*Container, *Container) (*Container, error)) {
+	
+	vec1 := make([]uint16, tt.vec1Numbers)
+	vec2 := make([]uint16, tt.vec2Numbers)
+
+	for i := 0; i < tt.vec1Numbers; i++ {
+		vec1[i] = uint16(i * tt.vec1Multiple)
+	}
+
+	for i := 0; i < tt.vec2Numbers; i++ {
+		vec2[i] = uint16(i * tt.vec2Multiple)
+	}
+
+	c1, err := containerFromVector(vec1)
+	if err != nil { t.Fatal(err.Error()) }
+
+	c2, err := containerFromVector(vec2)
+	if err != nil { t.Fatal(err.Error()) }
+
+	res1, err := f(c1, c2)
+	if err != nil { t.Fatal(err.Error()) }
+
+	res2, err := f(c2, c1)
+	if err != nil { t.Fatal(err.Error()) }
+
+	expectedVec := make([]uint16, tt.expectedNumbers)
+
+	for i := 0; i < tt.expectedNumbers; i++ {
+		expectedVec[i] = uint16(i * tt.expectedMultiple)
+	}
+
+	expected, err := containerFromVector(expectedVec)
+	if err != nil { t.Fatal(err.Error()) }
+
+	for _, res := range []*Container{res1, res2} {
+		if res.kind != expected.kind {
+			t.Errorf("want kind %d, got %d", expected.kind, res.kind)
+		}
+
+		compareContainers(res, expected, t)
+	}
+}
+
+func TestIntersectMany(t *testing.T) {
+	tests := []struct {
+		name string
+		vec1Numbers int 
+		vec1Multiple int
+		vec2Numbers int
+		vec2Multiple int
+		expectedNumbers int 
+		expectedMultiple int
+	}{
+		{
+			name: "first",
+			vec1Numbers: PROMOTION_THRESHOLD,
+			vec1Multiple: 3,
+			vec2Numbers: PROMOTION_THRESHOLD,
+			vec2Multiple: 2,
+			expectedNumbers: PROMOTION_THRESHOLD / 3,
+			expectedMultiple: 6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			
+
+
+		})
+	}
+}
