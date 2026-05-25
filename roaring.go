@@ -41,8 +41,9 @@ type Container struct {
 	size   int // max 2^16
 }
 
-func makeRoaring() Roaring {
-	return Roaring{}
+
+func MakeRoaring() *Roaring {
+	return new(Roaring{})
 }
 
 func (r *Roaring) Add(item uint32) (bool, error) {
@@ -95,8 +96,12 @@ func (r *Roaring) Size() uint64 {
 	return r.size
 }
 
-func (r *Roaring) intersect(o *Roaring) (*Roaring, error) {
-	res := new(makeRoaring())
+func (r *Roaring) NumContainers() int {
+	return len(r.entries)
+}
+
+func (r *Roaring) Intersect(o *Roaring) (*Roaring, error) {
+	res := MakeRoaring()
 	i, j := 0, 0
 
 	for i < len(r.entries) && j < len(o.entries) {
@@ -122,8 +127,8 @@ func (r *Roaring) intersect(o *Roaring) (*Roaring, error) {
 	return res, nil
 }
 
-func (r *Roaring) union(o *Roaring) (*Roaring, error) {
-	res := new(makeRoaring())
+func (r *Roaring) Union(o *Roaring) (*Roaring, error) {
+	res := MakeRoaring()
 	i, j := 0, 0
 
 	for i < len(r.entries) && j < len(o.entries) {
