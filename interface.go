@@ -10,9 +10,11 @@ type adapter[T any, I AllowedInt] interface {
 	add(I) (bool, error)
 	remove(I) (bool, error)
 	contains(I) (bool, error)
-	union(T) (T, error)
-	intersect(T) (T, error)
+	union(T) (adapter[T, I], error)
+	intersect(T) (adapter[T, I], error)
 	size() uint64
+	getMember() T
+	concreteSize() uint64
 }
 
 type roaringAdapter struct {
@@ -23,13 +25,23 @@ type AllowedInt interface {
 	~uint16 | ~uint32
 }
 
-func (r *Roaring) toAdapter() *roaringAdapter { return new (roaringAdapter{r}) }
+func (r *Roaring) toAdapter() *roaringAdapter { return new(roaringAdapter{r}) }
 func (s roaringAdapter) add(item uint32) (bool, error) { return s.r.Add(item) }
 func (s roaringAdapter) remove(item uint32) (bool, error) { return s.r.Remove(item) }
 func (s roaringAdapter) contains(item uint32) (bool, error) { return s.r.Contains(item) }
-func (s roaringAdapter) union(o *Roaring) (*Roaring, error) { return s.r.Union(o) }
-func (s roaringAdapter) intersect(o *Roaring) (*Roaring, error) { return s.r.Intersect(o) }
+func (s roaringAdapter) union(o *Roaring) (adapter[*Roaring, uint32], error) { 
+	roar, err := s.r.Union(o)
+	if err != nil { return roaringAdapter{}, err }
+	return *roar.toAdapter(), err
+}
+func (s roaringAdapter) intersect(o *Roaring) (adapter[*Roaring, uint32], error) { 
+	roar, err := s.r.Intersect(o)
+	if err != nil { return roaringAdapter{}, err }
+	return *roar.toAdapter(), err
+}
 func (s roaringAdapter) size() uint64 { return s.r.Size() }
+func (s roaringAdapter) getMember() *Roaring { return s.r }
+func (s roaringAdapter) concreteSize() uint64 { return s.r.concreteSize() }
 
 type containerAdapter struct {
 	c *Container
@@ -41,9 +53,39 @@ func (c *Container) toAdapter() *containerAdapter {
 func (s containerAdapter) add(item uint16) (bool, error) { return s.c.add(item) }
 func (s containerAdapter) remove(item uint16) (bool, error) { return s.c.remove(item) }
 func (s containerAdapter) contains(item uint16) (bool, error) { return s.c.contains(item) }
-func (s containerAdapter) union(o *Container) (*Container, error) { return s.c.union(o) }
-func (s containerAdapter) intersect(o *Container) (*Container, error) { return s.c.intersect(o) }
+func (s containerAdapter) union(o *Container) (adapter[*Container, uint16], error) { 
+	cont, err := s.c.union(o)
+	if err != nil { return containerAdapter{}, err }
+	return *cont.toAdapter(), err
+}
+func (s containerAdapter) intersect(o *Container) (adapter[*Container, uint16], error) { 
+	cont, err := s.c.intersect(o)
+	if err != nil { return containerAdapter{}, err }
+	return *cont.toAdapter(), err
+}
 func (s containerAdapter) size() uint64 { return uint64(s.c.size) }
+func (s containerAdapter) getMember() *Container { return s.c }
+func (s containerAdapter) concreteSize() uint64 { return s.c.concreteSize() }
+
+
+func (r *Roaring) concreteSize() uint64 {
+	res := uint64(0)
+	for _, entry := range r.entries {
+		res += entry.container.concreteSize()
+	}
+	return res
+}
+
+func (c *Container) concreteSize() uint64 {
+	switch c.kind {
+	case VECTOR:
+		return uint64(len(c.vector))
+	case BITMAP:
+		return uint64(bitMapOneBits(c.bitmap))
+	default:
+		panic("unknown kind")
+	}
+}
 
 func dummy[T any, I AllowedInt](a adapter[T, I]) {}
 
@@ -87,7 +129,6 @@ func getSortedUnique[I AllowedInt](m map[I]struct{}) []I {
 }
 
 func RoaringAddRemoveContainsTester(
-		name           string,
 		numMultiples   int,
 		multiple	   int,
 		extraItems	   []uint32,
@@ -95,11 +136,10 @@ func RoaringAddRemoveContainsTester(
 		r *Roaring, 
 		t *testing.T,
 	) {
-	addRemoveContainsTester(name, numMultiples, multiple, extraItems, pcgInput, r.toAdapter(), t)
+	addRemoveContainsTester(numMultiples, multiple, extraItems, pcgInput, r.toAdapter(), t)
 }
 
 func addRemoveContainsTester[T any, I AllowedInt](
-		name           string,
 		numMultiples   int,
 		multiple	   int,
 		extraItems	   []I,
@@ -110,6 +150,7 @@ func addRemoveContainsTester[T any, I AllowedInt](
 	uniqueMap := make(map[I]struct{}) // go idiom for set functionality
 
 	vec := generateVector[I](numMultiples, multiple)
+	vec = append(vec, extraItems...)
 
 	shuffled := slices.Clone(vec)
 	Shuffle(shuffled, pcgInput)
@@ -201,4 +242,190 @@ func addRemoveContainsTester[T any, I AllowedInt](
 	if a.size() != 0 {
 		t.Errorf("empty container should have size 0, got %d", a.size())
 	}
+}
+
+func vectorwiseIntersect[I AllowedInt](vec1 []I, vec2 []I) []I {
+	elems := make(map[I]struct{})
+	for _, item := range vec1 {
+		elems[item] = struct{}{}
+	}
+	var res []I
+	for _, item := range vec2 {
+		_, ok := elems[item]
+		if ok {
+			res = append(res, item)
+		}
+	}
+	slices.Sort(res)
+	return res
+}
+
+func vectorwiseUnion[I AllowedInt](vec1 []I, vec2 []I) []I {
+	elems := make(map[I]struct{})
+	for _, item := range vec1 {
+		elems[item] = struct{}{}
+	}
+	for _, item := range vec2 {
+		elems[item] = struct{}{}
+	}
+	return getSortedUnique(elems)
+}
+
+func applyOp[T any, I AllowedInt](f func(adapter[T, I], T) (adapter[T, I], error), 
+			  a1 adapter[T, I], a2 adapter[T, I], t *testing.T) adapter[T, I] {
+	res, err := f(a1, a2.getMember())
+	if err != nil { t.Fatal(err.Error()) }
+
+	return res
+}
+
+func validateAdapter[T any, I AllowedInt](actual adapter[T, I], expected []I, t *testing.T) {
+	if actual.size() != uint64(len(expected)) {
+		t.Fatalf("want size %d, got %d", len(expected), actual.size())
+	}
+
+	concrete := actual.concreteSize()
+	if concrete != uint64(len(expected)) {
+		t.Fatalf("want concrete size %d, got %d", len(expected), concrete)
+	}
+
+	for _, item := range expected {
+		contained, err :=  actual.contains(item) 
+		if err != nil { t.Fatal(err.Error()) }
+		if !contained {
+			t.Fatalf("item %d not contained in actual", item)
+		}
+	}
+}
+
+func containerFromVec(vec []uint16, t *testing.T) *Container {
+	res, err := containerFromVector(vec)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	return res
+}
+
+func containerAdapterFromVec(vec []uint16, t *testing.T) adapter[*Container, uint16] {
+	c := containerFromVec(vec, t)
+	return c.toAdapter()
+}
+
+func roaringFromVec(vec []uint32, t *testing.T) *Roaring {
+	roar := MakeRoaring()
+	for _, item := range vec {
+		_, err := roar.Add(item)
+		if err != nil { t.Fatal(err.Error()) }
+	}
+	return roar
+}
+
+func roaringAdapterFromVec(vec []uint32, t *testing.T) adapter[*Roaring, uint32] {
+	r := roaringFromVec(vec, t)
+	return r.toAdapter()
+}
+
+func containerLargeUnionIntersectionHelper(
+	isIntersect 	 bool,
+	vec1Numbers      int,
+	vec1Multiple     int,
+	vec1Offset 		 int,
+	vec2Numbers      int,
+	vec2Multiple     int,
+	vec2Offset 		 int,
+	t *testing.T, 
+) {
+	var adapterFunc func(adapter[*Container, uint16], *Container) (adapter[*Container, uint16], error)
+	var generateExpectedVec func([]uint16, []uint16) []uint16
+
+	if isIntersect {
+		adapterFunc = adapter[*Container, uint16].intersect
+		generateExpectedVec = vectorwiseIntersect
+	} else {
+		adapterFunc = adapter[*Container, uint16].union
+		generateExpectedVec = vectorwiseUnion
+	}
+	largeUnionIntersectHelper(
+		vec1Numbers,
+		vec1Multiple,
+		vec1Offset,
+		vec2Numbers,
+		vec2Multiple,
+		vec2Offset,
+		t,
+		adapterFunc,
+		generateExpectedVec,
+		containerAdapterFromVec,
+	)
+}
+
+func roaringLargeUnionIntersectionHelper(
+	isIntersect 	 bool,
+	vec1Numbers      int,
+	vec1Multiple     int,
+	vec1Offset 		 int,
+	vec2Numbers      int,
+	vec2Multiple     int,
+	vec2Offset 		 int,
+	t *testing.T, 
+	generateExpectedVec func([]uint32, []uint32) []uint32,
+) {
+	var adapterFunc func(adapter[*Roaring, uint32], *Roaring) (adapter[*Roaring, uint32], error)
+	if isIntersect {
+		adapterFunc = adapter[*Roaring, uint32].intersect
+	} else {
+		adapterFunc = adapter[*Roaring, uint32].union
+	}
+	largeUnionIntersectHelper(
+		vec1Numbers,
+		vec1Multiple,
+		vec1Offset,
+		vec2Numbers,
+		vec2Multiple,
+		vec2Offset,
+		t,
+		adapterFunc,
+		generateExpectedVec,
+		roaringAdapterFromVec,
+	)
+}
+
+func largeUnionIntersectHelper[T any, I AllowedInt](
+	vec1Numbers      int,
+	vec1Multiple     int,
+	vec1Offset 		 int,
+	vec2Numbers      int,
+	vec2Multiple     int,
+	vec2Offset 		 int,
+	t *testing.T, 
+	f func(adapter[T, I], T) (adapter[T, I], error),
+	generateExpectedVec func([]I, []I) []I,
+	adapterFromVec func([]I, *testing.T) adapter[T, I],
+) {
+	v1 := generateVectorWithOffset[I](vec1Numbers, vec1Multiple, vec1Offset)
+	v2 := generateVectorWithOffset[I](vec2Numbers, vec2Multiple, vec2Offset)
+
+	a1, a2 := adapterFromVec(v1, t), adapterFromVec(v2, t)
+
+	res1 := applyOp(f, a1, a2, t)
+	res2 := applyOp(f, a2, a1, t)
+
+	expectedVec := generateExpectedVec(v1, v2)
+	expected := adapterFromVec(expectedVec, t)
+
+	validateAdapter(res1, expectedVec, t)
+	validateAdapter(res2, expectedVec, t)
+
+	// ensure no mutation (i.e. expected is completely distinct)
+	added := false
+	var err error
+	for i := I(1); !added; i++ {
+		added, err = expected.add(i)
+		if err != nil { t.Fatal(err.Error()) }
+		if i == 0 { return } // overflowed
+	}
+
+	validateAdapter(res1, expectedVec, t)
+	validateAdapter(res2, expectedVec, t)
 }

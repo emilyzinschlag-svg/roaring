@@ -177,15 +177,6 @@ func generateContainerWithOffset(length, multiple, offset int, t *testing.T) *Co
 	return res
 }
 
-func containerFromVec(vec []uint16, t *testing.T) *Container {
-	res, err := containerFromVector(vec)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
-
-	return res
-}
-
 func checkConcreteSize(c *Container, t *testing.T) {
 	switch c.kind {
 	case VECTOR:
@@ -295,33 +286,10 @@ func TestAddRemoveContainsMany(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cont := makeContainer()
-			addRemoveContainsTester(tt.name, tt.numbersToAdd, tt.multiple, []uint16{},
+			addRemoveContainsTester(tt.numbersToAdd, tt.multiple, []uint16{},
 									tt.pcgInput, cont.toAdapter(), t)
 
-
-			// uniqueMap := make(map[uint16]struct{}) // go idiom for set functionality
-
-			// vec := generateVector[uint16](tt.numbersToAdd, tt.multiple)
-
-			// shuffled := slices.Clone(vec)
-			// r := rand.New(rand.NewPCG(tt.pcgInput, tt.pcgInput))
-			// r.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-
 			// container := makeContainer()
-
-			// for i, item := range shuffled {
-			// 	_, alreadyIn := uniqueMap[item]
-			// 	uniqueMap[item] = struct{}{}
-
-			// 	gotAdded, err := container.add(shuffled[i])
-			// 	if err != nil {
-			// 		t.Fatal(err.Error())
-			// 	}
-
-			// 	if alreadyIn == gotAdded {
-			// 		t.Fatalf("alreadyIn = %t but gotAdded = %t", alreadyIn, gotAdded)
-			// 	}
-			// }
 
 			// wantSize := len(uniqueMap)
 			// if wantSize != container.size {
@@ -332,16 +300,7 @@ func TestAddRemoveContainsMany(t *testing.T) {
 			// 	t.Errorf("want container kind %v, got %v", container.kind, tt.wantKind)
 			// }
 
-			// sortedUnique := getSortedUnique(uniqueMap)
-
-			// expected := containerFromVec(sortedUnique, t)
-
-			// shuffledUnique := slices.Clone(sortedUnique)
-			// r.Shuffle(len(shuffledUnique), func(i, j int) { shuffledUnique[i], shuffledUnique[j] = shuffledUnique[j], shuffledUnique[i] })
-
 			// compareContainers(container, expected, t)
-
-			// containerRemoveAllTester(container, shuffledUnique, t)
 
 			// should now be empty
 			if cont.kind != VECTOR {
@@ -468,48 +427,6 @@ func TestUnionFew(t *testing.T) {
 	}
 }
 
-func largeUnionIntersectHelper(tt struct {
-	name             string
-	vec1Numbers      int
-	vec1Multiple     int
-	vec1Offset 		 int
-	vec2Numbers      int
-	vec2Multiple     int
-	vec2Offset 		 int
-}, t *testing.T, f func(*Container, *Container) (*Container, error),
-	generateExpectedVec func([]uint16, []uint16) []uint16,
-) {
-	v1 := generateVectorWithOffset[uint16](tt.vec1Numbers, tt.vec1Multiple, tt.vec1Offset)
-	v2 := generateVectorWithOffset[uint16](tt.vec2Numbers, tt.vec2Multiple, tt.vec2Offset)
-
-	c1, c2 := containerFromVec(v1, t), containerFromVec(v2, t)
-	res1 := apply_op(f, c1, c2, t)
-	res2 := apply_op(f, c2, c1, t)
-
-	expectedVec := generateExpectedVec(v1, v2)
-	expected := containerFromVec(expectedVec, t)
-
-	compareContainers(res1, expected, t)
-	compareContainers(res2, expected, t)
-
-	// ensure no mutation (i.e. expected is completely distinct)
-	added := false
-	var err error
-	for i := uint16(1); !added; i++ {
-		added, err = expected.add(i)
-		if err != nil { t.Fatal(err.Error()) }
-		if i == 0 { return } // overflowed
-	}
-
-	for _, res := range []*Container{res1, res2} {
-		if expected.size != res.size + 1 {
-			t.Error("expected size should be one greater than res size")
-		}
-
-		checkConcreteSize(res, t)
-	}
-}
-
 func TestIntersectMany(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -592,25 +509,18 @@ func TestIntersectMany(t *testing.T) {
 		},
 	}
 
-	vectorwiseIntersect := func(vec1 []uint16, vec2 []uint16) []uint16 {
-		elems := make(map[uint16]struct{})
-		for _, item := range vec1 {
-			elems[item] = struct{}{}
-		}
-		var res []uint16
-		for _, item := range vec2 {
-			_, ok := elems[item]
-			if ok {
-				res = append(res, item)
-			}
-		}
-		slices.Sort(res)
-		return res
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			largeUnionIntersectHelper(tt, t, (*Container).intersect, vectorwiseIntersect)
+			containerLargeUnionIntersectionHelper(
+				true,
+				tt.vec1Numbers,
+				tt.vec1Multiple,
+				tt.vec1Offset,
+				tt.vec2Numbers,
+				tt.vec2Multiple,
+				tt.vec2Offset,
+				t, 
+			)
 		})
 	}
 }
@@ -736,20 +646,18 @@ func TestUnionMany(t *testing.T) {
 		},
 	}
 
-	vectorwiseUnion := func(vec1 []uint16, vec2 []uint16) []uint16 {
-		elems := make(map[uint16]struct{})
-		for _, item := range vec1 {
-			elems[item] = struct{}{}
-		}
-		for _, item := range vec2 {
-			elems[item] = struct{}{}
-		}
-		return getSortedUnique(elems)
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			largeUnionIntersectHelper(tt, t, (*Container).union, vectorwiseUnion)
+			containerLargeUnionIntersectionHelper(
+				false,
+				tt.vec1Numbers,
+				tt.vec1Multiple,
+				tt.vec1Offset,
+				tt.vec2Numbers,
+				tt.vec2Multiple,
+				tt.vec2Offset,
+				t, 
+			)
 		})
 	}
 }

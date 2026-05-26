@@ -31,37 +31,37 @@ func TestAddRemoveContainsMany(t *testing.T) {
 		numMultiples   int
 		multiple	   int
 		extraItems	   []uint32
-		// wantContainers int
+		wantContainers int
 		pcgInput	   uint64
 	}{
 		{
 			name:           "Empty",
 			extraItems: 	[]uint32{},
-			// wantContainers: 0,
+			wantContainers: 0,
 			pcgInput:		1,
 		},
 		{
 			name:           "One",
 			extraItems:     []uint32{0},
-			// wantContainers: 1,
+			wantContainers: 1,
 			pcgInput:		2,
 		},
 		{
 			name:           "Two",
 			extraItems:		[]uint32{0, 0},
-			// wantContainers: 1,
+			wantContainers: 1,
 			pcgInput:		67,
 		},
 		{
 			name:           "Three",
 			extraItems:		[]uint32{0, rr.MAX_CONTAINER_SIZE - 1},
-			// wantContainers: 1,
+			wantContainers: 1,
 			pcgInput:		420,
 		},
 		{
 			name:           "Four",
 			extraItems:		[]uint32{0, rr.MAX_CONTAINER_SIZE },
-			// wantContainers: 2,
+			wantContainers: 2,
 			pcgInput:		78,
 		},
 		{
@@ -75,14 +75,14 @@ func TestAddRemoveContainsMany(t *testing.T) {
 				9 * rr.MAX_CONTAINER_SIZE - 1,
 				9 * rr.MAX_CONTAINER_SIZE,
 			},
-			// wantContainers: 5,
+			wantContainers: 5,
 			pcgInput:		19,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			roaring := rr.MakeRoaring()
-			rr.RoaringAddRemoveContainsTester(tt.name, tt.numMultiples, tt.multiple, 
+			rr.RoaringAddRemoveContainsTester(tt.numMultiples, tt.multiple, 
 											 tt.extraItems, tt.pcgInput, roaring, t)
 
 			if roaring.NumContainers() != 0 {

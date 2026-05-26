@@ -198,13 +198,15 @@ func containerFromBitMap(bitmap *[CONTAINER_BITMAP_SIZE]WORD_TYPE) *Container {
 		res.size = len(res.vector)
 		return res
 	} else {
-		return new(Container{BITMAP, bitmap, nil, size})
+		clone := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		*clone = *bitmap
+		return new(Container{BITMAP, clone, nil, size})
 	}
 }
 
 func containerFromVector(vector []uint16) (*Container, error) {
 	if len(vector) < PROMOTION_THRESHOLD {
-		return new(Container{VECTOR, nil, vector, len(vector)}), nil
+		return new(Container{VECTOR, nil, slices.Clone(vector), len(vector)}), nil
 	} else {
 		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
 		prev := -1
