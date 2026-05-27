@@ -433,9 +433,11 @@ func TestIntersectMany(t *testing.T) {
 		vec1Numbers      int
 		vec1Multiple     int
 		vec1Offset 		 int
+		vec1Extra 		 []uint16
 		vec2Numbers      int
 		vec2Multiple     int
 		vec2Offset 		 int
+		vec2Extra 		 []uint16
 	}{
 		{
 			name:             "both_empty",
@@ -516,9 +518,11 @@ func TestIntersectMany(t *testing.T) {
 				tt.vec1Numbers,
 				tt.vec1Multiple,
 				tt.vec1Offset,
+				tt.vec1Extra,
 				tt.vec2Numbers,
 				tt.vec2Multiple,
 				tt.vec2Offset,
+				tt.vec2Extra,
 				t, 
 			)
 		})
@@ -531,9 +535,11 @@ func TestUnionMany(t *testing.T) {
 		vec1Numbers      int
 		vec1Multiple     int
 		vec1Offset 		 int
+		vec1Extra 		 []uint16
 		vec2Numbers      int
 		vec2Multiple     int
 		vec2Offset 		 int
+		vec2Extra		 []uint16
 	}{
 		{
 			name:             "both_empty",
@@ -653,9 +659,11 @@ func TestUnionMany(t *testing.T) {
 				tt.vec1Numbers,
 				tt.vec1Multiple,
 				tt.vec1Offset,
+				tt.vec1Extra,
 				tt.vec2Numbers,
 				tt.vec2Multiple,
 				tt.vec2Offset,
+				tt.vec2Extra,
 				t, 
 			)
 		})

@@ -46,6 +46,22 @@ func MakeRoaring() *Roaring {
 	return new(Roaring{})
 }
 
+func (r *Roaring) addEntry(e *Entry, idx int) bool {
+	if e.container.size == 0 { return false }
+
+	r.entries = slices.Insert(r.entries, idx, *e)
+	r.size += uint64(e.container.size)
+	return true
+}
+
+func (r *Roaring) addEntries(s []Entry) bool {
+	res := false
+	for _, e := range s {
+		res = res || r.addEntry(&e, len(r.entries))
+	}
+	return res
+}
+
 func (r *Roaring) Add(item uint32) (bool, error) {
 	return r.find(item, true, false)
 }
@@ -115,9 +131,7 @@ func (r *Roaring) Intersect(o *Roaring) (*Roaring, error) {
 			cont, err := e1.container.intersect(e2.container)
 			if err != nil { return nil, err }
 
-			if cont.size != 0 {
-				res.entries = append(res.entries, Entry{e1.key, cont})
-			}
+			res.addEntry(&Entry{e1.key, cont}, len(res.entries))
 
 			i++
 			j++
@@ -135,24 +149,24 @@ func (r *Roaring) Union(o *Roaring) (*Roaring, error) {
 		e1, e2 := r.entries[i], o.entries[j]
 
 		if e1.key < e2.key {
-			res.entries = append(res.entries, *copyEntry(&e1))
+			res.addEntry(copyEntry(&e1), len(res.entries))
 			i++
 		} else if e1.key > e2.key {
-			res.entries = append(res.entries, *copyEntry(&e2))
+			res.addEntry(copyEntry(&e2), len(res.entries))
 			j++
 		} else {
 			cont, err := e1.container.union(e2.container)
 			if err != nil { return nil, err }
 
-			res.entries = append(res.entries, Entry{e1.key, cont})
+			res.addEntry(&Entry{e1.key, cont}, len(res.entries))
 			i++
 			j++
 		}
 	}
 
-	res.entries = append(res.entries, copyEntries(r.entries[i:])...)
-	res.entries = append(res.entries, copyEntries(o.entries[j:])...)
-
+	res.addEntries(copyEntries(r.entries[i:]))
+	res.addEntries(copyEntries(o.entries[j:]))
+	
 	return res, nil
 }
 

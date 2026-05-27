@@ -331,9 +331,11 @@ func containerLargeUnionIntersectionHelper(
 	vec1Numbers      int,
 	vec1Multiple     int,
 	vec1Offset 		 int,
+	vec1Extra 		 []uint16,
 	vec2Numbers      int,
 	vec2Multiple     int,
 	vec2Offset 		 int,
+	vec2Extra 		 []uint16,
 	t *testing.T, 
 ) {
 	var adapterFunc func(adapter[*Container, uint16], *Container) (adapter[*Container, uint16], error)
@@ -350,9 +352,11 @@ func containerLargeUnionIntersectionHelper(
 		vec1Numbers,
 		vec1Multiple,
 		vec1Offset,
+		vec1Extra,
 		vec2Numbers,
 		vec2Multiple,
 		vec2Offset,
+		vec2Extra,
 		t,
 		adapterFunc,
 		generateExpectedVec,
@@ -360,30 +364,38 @@ func containerLargeUnionIntersectionHelper(
 	)
 }
 
-func roaringLargeUnionIntersectionHelper(
+func RoaringLargeUnionIntersectionHelper(
 	isIntersect 	 bool,
 	vec1Numbers      int,
 	vec1Multiple     int,
 	vec1Offset 		 int,
+	vec1Extra 		 []uint32,
 	vec2Numbers      int,
 	vec2Multiple     int,
 	vec2Offset 		 int,
+	vec2Extra 		 []uint32,
 	t *testing.T, 
-	generateExpectedVec func([]uint32, []uint32) []uint32,
 ) {
 	var adapterFunc func(adapter[*Roaring, uint32], *Roaring) (adapter[*Roaring, uint32], error)
+	var generateExpectedVec func([]uint32, []uint32) []uint32
+
 	if isIntersect {
 		adapterFunc = adapter[*Roaring, uint32].intersect
+		generateExpectedVec = vectorwiseIntersect
 	} else {
 		adapterFunc = adapter[*Roaring, uint32].union
+		generateExpectedVec = vectorwiseUnion
 	}
+
 	largeUnionIntersectHelper(
 		vec1Numbers,
 		vec1Multiple,
 		vec1Offset,
+		vec1Extra,
 		vec2Numbers,
 		vec2Multiple,
 		vec2Offset,
+		vec2Extra,
 		t,
 		adapterFunc,
 		generateExpectedVec,
@@ -395,16 +407,23 @@ func largeUnionIntersectHelper[T any, I AllowedInt](
 	vec1Numbers      int,
 	vec1Multiple     int,
 	vec1Offset 		 int,
+	vec1Extra		 []I,
 	vec2Numbers      int,
 	vec2Multiple     int,
 	vec2Offset 		 int,
+	vec2Extra 		 []I,
 	t *testing.T, 
 	f func(adapter[T, I], T) (adapter[T, I], error),
 	generateExpectedVec func([]I, []I) []I,
 	adapterFromVec func([]I, *testing.T) adapter[T, I],
 ) {
 	v1 := generateVectorWithOffset[I](vec1Numbers, vec1Multiple, vec1Offset)
+	v1 = append(v1, vec1Extra...)
+	slices.Sort(v1)
+
 	v2 := generateVectorWithOffset[I](vec2Numbers, vec2Multiple, vec2Offset)
+	v2 = append(v2, vec2Extra...)
+	slices.Sort(v2)
 
 	a1, a2 := adapterFromVec(v1, t), adapterFromVec(v2, t)
 
