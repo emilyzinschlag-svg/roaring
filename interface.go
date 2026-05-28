@@ -427,11 +427,20 @@ func largeUnionIntersectHelper[T any, I AllowedInt](
 
 	a1, a2 := adapterFromVec(v1, t), adapterFromVec(v2, t)
 
+	// fmt.Printf("v1 len: %d\n", len(v1))
+	// fmt.Printf("v2 len: %d\n", len(v2))
+	// fmt.Printf("a1 size and concrete: %d, %d\n", a1.size(), a1.concreteSize())
+	// fmt.Printf("a2 size and concrete: %d, %d\n", a2.size(), a2.concreteSize())
+
 	res1 := applyOp(f, a1, a2, t)
 	res2 := applyOp(f, a2, a1, t)
 
 	expectedVec := generateExpectedVec(v1, v2)
 	expected := adapterFromVec(expectedVec, t)
+
+	// fmt.Printf("res size: %d\n", res1.size())
+	// fmt.Printf("expected vec len: %d\n", len(expectedVec))
+	// fmt.Println()
 
 	validateAdapter(res1, expectedVec, t)
 	validateAdapter(res2, expectedVec, t)

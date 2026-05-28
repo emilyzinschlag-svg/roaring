@@ -57,7 +57,7 @@ func (r *Roaring) addEntry(e *Entry, idx int) bool {
 func (r *Roaring) addEntries(s []Entry) bool {
 	res := false
 	for _, e := range s {
-		res = res || r.addEntry(&e, len(r.entries))
+		res = r.addEntry(&e, len(r.entries)) || res
 	}
 	return res
 }
@@ -185,12 +185,10 @@ func copyContainer(c *Container) *Container {
 	res := new(Container{c.kind, c.bitmap, c.vector, c.size})
 	switch c.kind {
 	case BITMAP:
-		bitmap := new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
-		*bitmap = *c.bitmap 
-		res.bitmap = bitmap
+		res.bitmap = new([CONTAINER_BITMAP_SIZE]WORD_TYPE)
+		*res.bitmap = *c.bitmap 
 	case VECTOR:
-		vector := slices.Clone(c.vector)
-		res.vector = vector
+		res.vector = slices.Clone(c.vector)
 	default:
 		panic("unrecognized kind")
 	}
