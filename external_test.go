@@ -7,24 +7,6 @@ import (
 	"testing"
 )
 
-func roaringFromVec(vec []uint32, t *testing.T) *rr.Roaring {
-	res := rr.MakeRoaring()
-	for _, item := range vec {
-		_, err := res.Add(item)
-		if err != nil { t.Fatal(err.Error()) }
-	}
-
-	return res
-}
-
-func apply_op(f func(*rr.Roaring, *rr.Roaring) (*rr.Roaring, error), 
-			  r1 *rr.Roaring, r2 *rr.Roaring, t *testing.T) *rr.Roaring {
-	res, err := f(r1, r2)
-	if err != nil { t.Fatal(err.Error()) }
-
-	return res
-}
-
 func TestAddRemoveContainsMany(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -91,7 +73,7 @@ func TestAddRemoveContainsMany(t *testing.T) {
 		})
 	}
 }
-func TestIntersectMany(t *testing.T) {
+func TestIntersectManyRoaring(t *testing.T) {
 	tests := []struct {
 		name             string
 		vec1Numbers      int
@@ -266,7 +248,7 @@ func TestIntersectMany(t *testing.T) {
 	}
 }
 
-func TestUnionMany(t *testing.T) {
+func TestUnionManyRoaring(t *testing.T) {
 	tests := []struct {
 		name             string
 		vec1Numbers      int

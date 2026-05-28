@@ -427,7 +427,7 @@ func TestUnionFew(t *testing.T) {
 	}
 }
 
-func TestIntersectMany(t *testing.T) {
+func TestIntersectManyContainer(t *testing.T) {
 	tests := []struct {
 		name             string
 		vec1Numbers      int
@@ -529,7 +529,7 @@ func TestIntersectMany(t *testing.T) {
 	}
 }
 
-func TestUnionMany(t *testing.T) {
+func TestUnionManyContainer(t *testing.T) {
 	tests := []struct {
 		name             string
 		vec1Numbers      int

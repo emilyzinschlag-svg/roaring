@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"sync"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -14,6 +16,8 @@ const (
 	MAX_CONTAINER_SIZE    = 1 << 16
 	CONTAINER_BITMAP_SIZE = MAX_CONTAINER_SIZE / WORD_SIZE
 )
+
+const taskThreshold = 16
 
 type WORD_TYPE uint64
 
@@ -27,11 +31,16 @@ const (
 type Roaring struct {
 	entries []Entry
 	size    uint64 // max 2^32
+	mu 		sync.RWMutex 
 }
 
 type Entry struct {
 	key       uint16
 	container *Container
+}
+
+func (e Entry) getKey() uint16 {
+	return e.key
 }
 
 type Container struct {
@@ -81,8 +90,10 @@ func (r *Roaring) find(item uint32, addIfMissing bool, removeIfExists bool) (boo
 
 	upper, lower := uint16(item >> 16), uint16(item & 0xFFFF)
 
-	conversionFunc := func(entry Entry) uint16 { return entry.key }
-	containerIdx, alreadyExists := getInsertionIdx(r.entries, upper, conversionFunc)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	containerIdx, alreadyExists := getInsertionIdx(r.entries, upper, Entry.getKey)
 
 	if !alreadyExists {
 		if addIfMissing {
@@ -109,16 +120,58 @@ func (r *Roaring) find(item uint32, addIfMissing bool, removeIfExists bool) (boo
 }
 
 func (r *Roaring) Size() uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	return r.size
 }
 
 func (r *Roaring) NumContainers() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	return len(r.entries)
+}
+
+type task struct {
+	key uint16 
+	c1, c2 *Container
+}
+
+func merge[T any, S cmp.Ordered](slice1 []T, slice2 []T, conversionFunc func(T) S) []T {
+	res := make([]T, 0, len(slice1) + len(slice2))
+	
+	i, j := 0, 0
+	for i < len(slice1) && j < len(slice2) {
+		if conversionFunc(slice1[i]) == conversionFunc(slice2[j]) { 
+			panic("inputs must be fully distinct when compared")
+		}
+
+		if conversionFunc(slice1[i]) < conversionFunc(slice2[j]) {
+			res = append(res, slice1[i])
+			i++
+		} else {
+			res = append(res, slice2[j])
+			j++
+		}
+	}
+
+	res = append(res, slice1[i:]...)
+	res = append(res, slice2[j:]...)
+
+	return res
+}
+
+func sortSlice[T any, S cmp.Ordered](s []T, conversionFunc func(T) S) {
+	slices.SortFunc(s, func(a T, b T) int {
+		return cmp.Compare(conversionFunc(a), conversionFunc(b))
+	})
 }
 
 func (r *Roaring) Intersect(o *Roaring) (*Roaring, error) {
 	res := MakeRoaring()
 	i, j := 0, 0
+	var tasks []task 
 
 	for i < len(r.entries) && j < len(o.entries) {
 		e1, e2 := r.entries[i], o.entries[j]
@@ -128,15 +181,31 @@ func (r *Roaring) Intersect(o *Roaring) (*Roaring, error) {
 		} else if e1.key > e2.key {
 			j++
 		} else {
-			cont, err := e1.container.intersect(e2.container)
-			if err != nil { return nil, err }
-
-			res.addEntry(&Entry{e1.key, cont}, len(res.entries))
-
+			tasks = append(tasks, task{e1.key, e1.container, e2.container})
 			i++
 			j++
 		}
 	}
+
+	res.entries = make([]Entry, len(tasks))
+	g := new(errgroup.Group)
+
+	for i, t := range tasks {
+		g.Go(func() error {
+			r, err := t.c1.intersect(t.c2)
+			if err != nil { return err }
+
+			res.entries[i] = Entry{t.key, r}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	sortSlice(res.entries, Entry.getKey)
+	res.size = res.concreteSize()
 
 	return res, nil
 }
@@ -144,6 +213,7 @@ func (r *Roaring) Intersect(o *Roaring) (*Roaring, error) {
 func (r *Roaring) Union(o *Roaring) (*Roaring, error) {
 	res := MakeRoaring()
 	i, j := 0, 0
+	var tasks []task
 
 	for i < len(r.entries) && j < len(o.entries) {
 		e1, e2 := r.entries[i], o.entries[j]
@@ -155,10 +225,7 @@ func (r *Roaring) Union(o *Roaring) (*Roaring, error) {
 			res.addEntry(copyEntry(&e2), len(res.entries))
 			j++
 		} else {
-			cont, err := e1.container.union(e2.container)
-			if err != nil { return nil, err }
-
-			res.addEntry(&Entry{e1.key, cont}, len(res.entries))
+			tasks = append(tasks, task{e1.key, e1.container, e2.container})
 			i++
 			j++
 		}
@@ -166,7 +233,30 @@ func (r *Roaring) Union(o *Roaring) (*Roaring, error) {
 
 	res.addEntries(copyEntries(r.entries[i:]))
 	res.addEntries(copyEntries(o.entries[j:]))
-	
+
+	taskEntries := make([]Entry, len(tasks))
+	g := new(errgroup.Group)
+	for i, t := range tasks {
+		g.Go(func() error {
+			res, err := t.c1.union(t.c2)
+			if err != nil { return err }
+
+			taskEntries[i] = Entry{t.key, res}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	sortSlice(taskEntries, Entry.getKey)
+	sortSlice(res.entries, Entry.getKey)
+	res.entries = merge(res.entries, taskEntries, Entry.getKey)
+
+	// res.entries = append(res.entries, taskEntries...)
+	// sortSlice(res.entries, Entry.getKey)
+	res.size = res.concreteSize()
 	return res, nil
 }
 
